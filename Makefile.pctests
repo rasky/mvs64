@@ -1,0 +1,24 @@
+BUILD_DIR = build/pctests
+
+include n64.mk
+
+emu_src = emu.c roms.c hw.c video.c m68kcpu.c m68kops.c m68kdasm.c platform_sdl.c
+emu_obj = $(emu_src:%.c=$(BUILD_DIR)/%.o)
+
+CFLAGS += -O2 -Wall -Werror
+
+CFLAGS += $(shell pkg-config --cflags sdl2)
+LDFLAGS += $(shell pkg-config --libs sdl2)
+
+all: emu
+
+emu: $(emu_obj)
+	@echo "    [LD] $@"
+	$(CC) $(LDFLAGS) -o $@ $^
+
+clean:
+	@rm -f $(emu_obj)
+
+-include $(emu_src:%.c=$(BUILD_DIR)/%.d)
+
+.PHONY: all
