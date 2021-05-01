@@ -2,6 +2,8 @@
 #define ROMS_H
 
 extern uint8_t P_ROM[];
+extern uint8_t S_ROM[];
+extern uint8_t SFIX_ROM[];
 
 void rom_load_bios(const char *dir);
 void rom_load_mslug(const char *dir);

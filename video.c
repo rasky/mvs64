@@ -154,7 +154,7 @@ void video_palette_w(uint32_t address, uint32_t val, int sz) {
 #include "m68k.h"
 
 uint32_t video_palette_r(uint32_t address, int sz) {
-	assertf(sz == 2, "video_palette_r access size %d %x %lx", sz, m68k_get_reg(NULL, M68K_REG_PC), C0_READ_EPC());
+	assertf(sz == 2, "video_palette_r access size %d", sz);
 	address &= 0x1FFF;
 	address /= 2;
 

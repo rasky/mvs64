@@ -161,16 +161,21 @@ int main(void) {
 	m68k_pulse_reset();
 	m68k_clock = 0;
 
-	cpu_start_trace(3000);
-
 	emu_add_event(LINE_CLOCK*248, emu_vblank_start, NULL);
 
 	for (int i=0;i<7000;i++) {
+		#ifdef N64
 		uint32_t t0 = TICKS_READ();
+		#endif
 		emu_run_frame();
 		if (!plat_poll()) break;
 
+		#ifdef N64
 		uint32_t tlen = TICKS_DISTANCE(t0, TICKS_READ());
+		#else
+		unsigned long tlen = 0;
+		const int TICKS_PER_SECOND = 60;
+		#endif
 		debugf("[PROFILE] ticks:%ld cpu:%.2f%% PC:%06x\n", tlen, (float)tlen * 100.f / (float)(TICKS_PER_SECOND / 60), m68k_get_reg(NULL, M68K_REG_PC));
 
 		#ifndef N64

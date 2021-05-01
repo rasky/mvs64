@@ -14,15 +14,18 @@ typedef uint32_t u_uint32_t __attribute__((aligned(1)));
 
 extern void cpu_start_trace(int cnt);
 
+#ifdef N64
+#define ALIGN_64K __attribute__((aligned(64*1024)))
+#else
+#define ALIGN_64K
+#endif
+
 uint8_t P_ROM_VECTOR[0x80];
 uint8_t BIOS[128*1024];
-uint8_t WORK_RAM[64*1024] __attribute__((aligned(64*1024)));
-uint8_t BACKUP_RAM[64*1024] __attribute__((aligned(64*1024)));
+uint8_t WORK_RAM[64*1024] ALIGN_64K;
+uint8_t BACKUP_RAM[64*1024] ALIGN_64K;
 uint32_t PALETTE_RAM[8*1024];  // two banks
 uint16_t VIDEO_RAM[34*1024];
-
-uint8_t S_ROM[1024]; //[128*1024];
-uint8_t SFIX_ROM[1024]; //[128*1024];
 
 uint8_t *CUR_S_ROM;
 uint32_t *CUR_PALETTE_RAM;
@@ -65,8 +68,10 @@ uint32_t read_hwio(uint32_t addr, int sz)  {
 		m68k_end_timeslice();
 	}
 
+#ifdef N64
 	if (addr != 0x3C0002)
 		debugf("[HWIO] read%d: %06x (68K PC:%x EPC:%lx)\n", sz*8, (unsigned int)addr, m68k_get_reg(NULL, M68K_REG_PC), C0_READ_EPC());
+#endif
 
 	if ((addr>>16) == 0x30) switch (addr&0xFFFF) {
 		case 0x00: assert(sz==1); return input_p1cnt_r();
@@ -91,8 +96,10 @@ uint32_t read_hwio(uint32_t addr, int sz)  {
 }
 
 void write_hwio(uint32_t addr, uint32_t val, int sz)  {
+#ifdef N64
 	if (addr != 0x3C0002)
 		debugf("[HWIO] write%d: %06x <- %0*x (68K PC:%x EPC:%lx)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, m68k_get_reg(NULL, M68K_REG_PC), C0_READ_EPC());
+#endif
 
 	if ((addr>>16) == 0x30) switch (addr&0xFFFF) {
 		case 0x01: return; // watchdog
@@ -195,7 +202,8 @@ unsigned int m68k_read_disassembler_32(unsigned int address) {
 	return 0xFFFFFFFF;
 }
 
-#if 0
+#ifndef N64
+
 uint8_t *pc_fastptr_bank;
 
 static void pc_fastptr_refresh(unsigned int address) {
@@ -205,36 +213,7 @@ static void pc_fastptr_refresh(unsigned int address) {
 	// debugf("[HW] fastptr refresh: %x\n", address);
 }
 
-unsigned int  m68k_read_immediate_16(unsigned int address) {
-	return BE16(*(u_uint16_t*)(pc_fastptr_bank + (address&0xFFFFF)));
-}
-
-unsigned int  m68k_read_immediate_32(unsigned int address) {
-	return BE32(*(u_uint32_t*)(pc_fastptr_bank + (address&0xFFFFF)));
-}
-
-unsigned int  m68k_read_pcrelative_8(unsigned int address) { 
-	// return m68k_read_memory_8(address);
-	// if (!pc_fastptr) pc_fastptr_refresh(address);
-	return *(pc_fastptr_bank + (address&0xFFFFF));
-}
-
-unsigned int  m68k_read_pcrelative_16(unsigned int address) { 
-	// return m68k_read_memory_16(address);
-	// if (!pc_fastptr) pc_fastptr_refresh(address);
-	unsigned int val = BE16(*(u_uint16_t*)(pc_fastptr_bank + (address&0xFFFFF)));
-	return val;
-}
-
-unsigned int  m68k_read_pcrelative_32(unsigned int address) { 
-	// return m68k_read_memory_32(address);
-	// if (!pc_fastptr) pc_fastptr_refresh(address);
-	unsigned int val = BE32(*(u_uint32_t*)(pc_fastptr_bank + (address&0xFFFFF)));
-	return val;
-}
-#endif
-
-#ifdef N64
+#else
 
 #define C0_INDEX() ({ \
     uint32_t x; \
@@ -384,8 +363,6 @@ void hw_init(void) {
 	#endif
 
 	#endif
-
-
 
 	rtc_init();
 
