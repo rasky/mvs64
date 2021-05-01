@@ -965,12 +965,13 @@ int m68k_execute(int num_cycles)
 		/* Return point if we had an address error */
 		m68ki_set_address_error_trap(); /* auto-disable (see m68kcpu.h) */
 
-		m68ki_check_bus_error_trap();
+		//rasky: disable bus error for performance
+		//m68ki_check_bus_error_trap();
 
 		/* Main loop.  Keep going until we run out of clock cycles */
 		do
 		{
-			int i;
+			//int i;
 			/* Set tracing accodring to T1. (T0 is done inside instruction) */
 			m68ki_trace_t1(); /* auto-disable (see m68kcpu.h) */
 
@@ -982,12 +983,13 @@ int m68k_execute(int num_cycles)
 
 			/* Record previous program counter */
 			REG_PPC = REG_PC;
-
+#if 0
+			// rasky: disable bus error for performance
 			/* Record previous D/A register state (in case of bus error) */
 			for (i = 15; i >= 0; i--){
 				REG_DA_SAVE[i] = REG_DA[i];
 			}
-
+#endif
 			/* Read an instruction and call its handler */
 			REG_IR = m68ki_read_imm_16();
 			m68ki_instruction_jump_table[REG_IR]();
