@@ -10,6 +10,11 @@ CFLAGS += -O2 -Wall -Werror
 CFLAGS += $(shell pkg-config --cflags sdl2)
 LDFLAGS += $(shell pkg-config --libs sdl2)
 
+ifeq ($(D),1)
+CFLAGS += -fsanitize=address -fsanitize=undefined
+LDFLAGS += -fsanitize=address -fsanitize=undefined
+endif
+
 all: emu
 
 emu: $(emu_obj)
