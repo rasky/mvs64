@@ -8,7 +8,7 @@
 	.set noat
 
 mvs_tlbhandler:
-	# Check whether the address is in one of these ranges:
+	# Check whether the faulting address is in one of these ranges:
 	#  * 0x3nnnnn: hardware register of MVS
 	#  * 0x4nnnnn: palette RAM (go through handlers for conversion to RGB32)
 	mfc0 k1, C0_BADVADDR
@@ -20,32 +20,37 @@ mvs_tlbhandler:
 	beqz k0, tlb_start
 	nop
 
-	# Go back to the standard handled that will crash
+	# Otherwise, go back to the standard handler (that will crash and show exception on screen)
 	j tlbfallback
 	nop
 
 tlb_start:
+	# Check if the exception happened in a delay slot. If so, change EPC
+	# so that it points to the delay slot itself, so that the following code
+	# can refer to EPC as the faulting memory read/write.
 	mfc0 k0, C0_CAUSE
-	bgez k0, tlb_start_checkaddr
+	bgez k0, tlb_start_checkaddr    # Bit 31: BD (exception in delay slot)
 	mfc0 k0, C0_EPC
 	addi k0, 4
 	mtc0 k0, C0_EPC
 
 tlb_start_checkaddr:
-	# 0x300001: watchdog. This is very common. We special case it
-	# by ignoring all writes to it
+	# If the TLB exception is caused by a write to 0x300001, it's the watchdog.
+	# This is very common. We special case it by ignoring all writes to it,
+	# without going through the full exception handler.
 	li k0, 0x300001
 	bne k0, k1, tlbcallhandler
 	mfc0 k0, C0_CAUSE
 	andi k0, 0x7F
-	li k1, C0_CAUSE_TLBSTORE<<2
+	li k1, C0_CAUSE_TLBSTORE<<2   # CAUSE_TLBSTORE = memory write
 	beq k0, k1, tlbdone
 	nop
 
 tlbcallhandler:
+	# Save all caller-saved registers
 	addi sp, -24*8
 	# Keep slots 0-3 empty as argument slots for function calls.
-	# This is required by MIPS API even if we only call functions
+	# This is required by MIPS ABI even if we only call functions
 	# that receive arguments in registers.
 	sd $1, 4*8(sp)
 	sd $2, 5*8(sp)
@@ -65,7 +70,7 @@ tlbcallhandler:
 	sd $24, 19*8(sp)
 	sd $25, 20*8(sp)
 	sd $31, 21*8(sp)
-	.set at
+	.set at          # we can use assembly macros now to simplify our job
 
 	mfc0 t0, C0_EPC
 	nop
@@ -80,11 +85,14 @@ tlbcallhandler:
 	# touch FPU. If they do for a bug, a Coprocessor Unusable exception
 	# will trigger. Also disable EXL to allow exception-in-exception
 	# processing, which should be safe at this point.
-	li t0, ~((0<<29)|(0<<1))
+	li t0, ~((0<<29)|(0<<1))   # FIXME: disabled for now
 	and t1, t0
 	mtc0 t1, C0_SR
 
-	# Decode EPC instruction
+	# Decode faulting instruction at EPC. We get the memory address in C0_BADVADDR,
+	# but we need to decode the RS register because it contains the actual value
+	# being read/written. Also, the opcode itself encodes the access width (eg:
+	# LH = 2 bytes).
 	mfc0 t1, C0_EPC
 	nop
 	nop
@@ -110,28 +118,41 @@ tlbcallhandler:
 	beq t0, 0x2E, tlb_restore    # SWR (ignore, we emulate on SWL)
 	li a2, 4
 
-
-	# Unknown instruction?
+	# Unsupported read/write instruction. Go to the fallback handler that will
+	# crash on the screen.
 	# FIXME: we already poisoned registers and stack!
 	j tlbfallback
 	nop
 
+
+	##########################################
+	# Memory-mapped registers: READS
+	#
+	##########################################
+
 tlb_readhwio:
+	# We're ready to call the memory handler. Use read_hwio for HWIO reads,
+	# and video_palette_r for palette reads.
 	mfc0 a0, C0_BADVADDR
 	srl t0, a0, 20
 	beq t0, 4, tlb_readhwio_palette
 	nop
 
-	jal read_hwio
-	nop
-	j tlb_readhwio_epilog
+	la ra, tlb_readhwio_epilog
+	j read_hwio
 	nop
 
 tlb_readhwio_palette:
-	jal video_palette_r
+	la ra, tlb_readhwio_epilog
+	j video_palette_r
 	nop
 
 tlb_readhwio_epilog:
+	# The memory handler returned in v0 the value that needs to be stored in
+	# the target MIPS register of the faulting instruction. Decode the RS field
+	# of the opcode and use a jump table to copy V0 into the correct register.
+	# For caller-saved registers, we insert the value directly into the stack
+	# frame.
 	mfc0 t1, C0_EPC
 	lw t1, 0(t1)		
 	srl t0, t1, 16-3
@@ -207,10 +228,21 @@ tlb_readhwio_writedest:
 	move $31, v0
 
 tlb_readhwio_end:
+	# OK we're done. Exit
 	j tlb_restore
 	nop
 
+	##########################################
+	# Memory-mapped registers: WRITES
+	#
+	##########################################
+
 tlb_writehwio:
+	# We need to decode the RS field of the faulting instruction to read the
+	# register that contains the value that needs to be written into the
+	# emulating memory-mapped register. We use a jump table to load the correct
+	# value into a1. For caller-saved registers, we use the value saved in the
+	# stack frame (in case we've already modified it).
 	srl t0, t1, 16-3
 	andi t0, 0x1F<<3
 	la t2, tlb_writehwio_fetchsrc
@@ -284,6 +316,8 @@ tlb_writehwio_fetchsrc:
 	move a1, $31
 
 tlb_writehwio_do:
+	# Call the memory handler. write_hwio for HWIO, and video_palette_w for
+	# palette RAM.
 	mfc0 a0, C0_BADVADDR
 	srl t0, a0, 20
 	beq t0, 4, tlb_writehwio_palette
@@ -298,13 +332,20 @@ tlb_writehwio_palette:
 	j video_palette_w
 	nop
 
+
+	##########################################
+	# Memory-mapped registers: EXIT
+	#
+	##########################################
+
 tlb_restore:
+	# Restore the stack frame
 	ld t0, 23*8(sp)
 	ld t1, 22*8(sp)
 	mtc0 t0, C0_SR
 	mtc0 t1, C0_EPC
 
-	.set noat
+	.set noat    # no more assembly macros from now on
 	ld $1, 4*8(sp)
 	ld $2, 5*8(sp)
 	ld $3, 6*8(sp)
@@ -326,6 +367,8 @@ tlb_restore:
 	addi sp, 24*8
 
 tlbdone:
+	# If the exception did not happen in the delay slot, we can simply
+	# add 4 to EPC to skip the faulting instruction, and exit the exception.
 	mfc0 k1, C0_CAUSE
 	bltz k1, tlb_done_delayslot
 	mfc0 k0, C0_EPC
@@ -337,7 +380,7 @@ tlbdone:
 	eret
 
 tlb_done_delayslot:
-	# The TLB instruction was in a delay slot. Since we didn't map anything
+	# The faulting instruction was in a delay slot. Since we didn't map anything
 	# but just simulate the read/write, we need to jump to the branch destination
 	# now. There are three kind of branch instructions:
 	#   * "branches" with 16-bit signed offset (scaled by 4)
