@@ -1,4 +1,3 @@
-#include "platform_sdl.h"
 #include <SDL.h>
 #include <assert.h>
 #include <time.h>

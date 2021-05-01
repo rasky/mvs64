@@ -117,8 +117,8 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 		case 0x1F: assert(sz==1); CUR_PALETTE_RAM = PALETTE_RAM + 0x0000; return;
 		case 0x0D: assert(sz==1); banks[0xD].w = write_unk; return;
 		case 0x1D: assert(sz==1); banks[0xD].w = NULL; return;
-		case 0x0B: assert(sz==1); CUR_S_ROM = SFIX_ROM; return;
-		case 0x1B: assert(sz==1); CUR_S_ROM = S_ROM; return;
+		case 0x0B: assert(sz==1); srom_set_bank(0); return;
+		case 0x1B: assert(sz==1); srom_set_bank(1); return;
 
 	} else if ((addr>>16) == 0x3C) switch (addr&0xFFFF) {
 		case 0x00: lspc_vram_addr_w(val, sz); return;
@@ -314,7 +314,6 @@ void tlb_map_area(unsigned int idx, uint32_t virt, uint32_t vmask, void* phys, b
 void hw_init(void) {
 	memset(banks, 0, sizeof(banks));
 	memcpy(P_ROM_VECTOR, P_ROM, sizeof(P_ROM_VECTOR));
-	CUR_S_ROM = SFIX_ROM;
 	CUR_PALETTE_RAM = PALETTE_RAM;
 
 	banks[0x0] = (Bank){ P_ROM+0x000000,   0xFFFFF,   NULL,            write_unk };

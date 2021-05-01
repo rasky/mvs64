@@ -4,10 +4,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-extern uint8_t S_ROM[];
-extern uint8_t SFIX_ROM[];
-extern uint8_t *CUR_S_ROM;
-
 extern uint8_t BIOS[128*1024];
 
 extern uint8_t WORK_RAM[64*1024];

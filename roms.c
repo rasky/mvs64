@@ -11,8 +11,8 @@
 
 uint8_t P_ROM[2*1024*1024] __attribute__((aligned(256*1024)));
 
-uint8_t S_ROM[1024]; //[128*1024];
-uint8_t SFIX_ROM[1024]; //[128*1024];
+uint8_t S_ROM[1024];
+uint8_t SFIX_ROM[1024];
 
 //static uint8_t crom_cache[(8*16) * 128] __attribute__((aligned(8)));
 // static int crom_cache_idx;
@@ -28,12 +28,16 @@ uint8_t* srom_get_sprite(int spritenum) {
 	// return crom_cache;
 }
 
+void srom_set_bank(int bank) {
+}
+
 #else
 
 uint8_t P_ROM[5*1024*1024];
 uint8_t S_ROM[128*1024];
 uint8_t SFIX_ROM[128*1024];
 static uint8_t C_ROM[64*1024*1024];
+static uint8_t *CUR_S_ROM;
 
 static void fixrom_preprocess(uint8_t *rom, int sz) {
 	#define NIBBLE_SWAP(v_) ({ uint8_t v = (v_); (((v)>>4) | ((v)<<4)); })
@@ -88,7 +92,18 @@ static void crom_preprocess(uint8_t *rom0, int sz) {
 }
 
 uint8_t* crom_get_sprite(int spritenum) {
-	return C_ROM + spritenum*8*16;
+	return C_ROM + ((spritenum*8*16) & (sizeof(C_ROM)-1));
+}
+
+uint8_t* srom_get_sprite(int spritenum) {
+	return CUR_S_ROM + spritenum*8*4;
+}
+
+void srom_set_bank(int bank) {
+	if (bank)
+		CUR_S_ROM = S_ROM;
+	else
+		CUR_S_ROM = SFIX_ROM;
 }
 
 #endif
@@ -126,6 +141,8 @@ void rom_load_bios(const char *dir) {
 	fwrite(SFIX_ROM, 128*1024, 1, f);
 	fclose(f);
 	#endif
+
+	srom_set_bank(0);  // Set SFIX as current
 }
 
 void rom_load_mslug(const char *dir) {
