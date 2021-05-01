@@ -10,7 +10,7 @@
 
 static int cpu_trace_count = 0;
 
-static void cpu_trace(unsigned int pc) {
+void cpu_trace(unsigned int pc) {
 	if (cpu_trace_count == 0) {
 		m68k_set_instr_hook_callback(NULL);
 		return;
@@ -43,8 +43,10 @@ static void cpu_trace(unsigned int pc) {
 }
 
 void cpu_start_trace(int cnt) {
+	#ifndef N64
 	m68k_set_instr_hook_callback(cpu_trace);
 	cpu_trace_count = cnt;
+	#endif
 }
 
 static int g_frame;
@@ -102,7 +104,7 @@ uint32_t emu_pc(void) {
 	return m68k_get_reg(NULL, M68K_REG_PC);
 }
 
-unsigned int emu_vblank_start(void* arg) {
+uint32_t emu_vblank_start(void* arg) {
 	m68k_set_virq(1, true);
 	hw_vblank();
 	debugf("[EMU] VBlank - clock:%lld clock_frame:%lld\n", emu_clock(), emu_clock_frame());
@@ -133,38 +135,51 @@ void emu_run_frame(void) {
 }
 
 int main(void) {
+	plat_init(44100, FPS);
+	plat_enable_video(true);
+
+	#ifdef N64
+	rom_load_bios("rom:/");
+	rom_load_mslug("rom:/");
+	#else
 	rom_load_bios("roms/bios/");
-	// rom_load_mslug("roms/mslug/");
+	rom_load_mslug("roms/mslug/");
 	// rom_load_aof("roms/aof/");
 	// rom_load_kof98("roms/kof98/");
+	// rom_load_samsho("roms/samsho/");
 	// rom_load_spriteex("roms/spriteex/");
 	// rom_load_nyanmvs("roms/nyanmvs/");
-	rom_load_krom("roms/krom/");
+	// rom_load_krom("roms/krom/");
+	#endif
+
+	m68k_init();
 
 	hw_init();
 	g_clock = 0;
 
-	video_init();
-
-	m68k_init();
 	m68k_set_cpu_type(M68K_CPU_TYPE_68000);
 	m68k_pulse_reset();
 	m68k_clock = 0;
 
+	cpu_start_trace(3000);
+
 	emu_add_event(LINE_CLOCK*248, emu_vblank_start, NULL);
 
-	plat_init(44100, FPS);
-	plat_enable_video(true);
-
 	for (int i=0;i<7000;i++) {
+		uint32_t t0 = TICKS_READ();
 		emu_run_frame();
 		if (!plat_poll()) break;
 
+		uint32_t tlen = TICKS_DISTANCE(t0, TICKS_READ());
+		debugf("[PROFILE] ticks:%ld cpu:%.2f%% PC:%06x\n", tlen, (float)tlen * 100.f / (float)(TICKS_PER_SECOND / 60), m68k_get_reg(NULL, M68K_REG_PC));
+
+		#ifndef N64
 		uint8_t *screen; int pitch;
 
 		plat_beginframe(&screen, &pitch);
 		video_render((uint32_t*)screen, pitch);
 		plat_endframe();
+		#endif
 	}
 
 	debugf("end\n");
@@ -172,9 +187,11 @@ int main(void) {
 	m68k_exec(g_clock+100);
 
 	fprintf(stderr, "SR=%04x\n", m68k_get_reg(NULL, M68K_REG_SR));
+	#ifndef N64
 	FILE *f = fopen("vram.dump", "wb");
 	fwrite(VIDEO_RAM, 1, sizeof(VIDEO_RAM), f);
 	fclose(f);
+	#endif
 
 	plat_save_screenshot("screen.bmp");
 }

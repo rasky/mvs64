@@ -25,7 +25,7 @@ static void lspc_vram_addr_w(uint32_t val, int sz) {
 	}
 	assert(sz == 2);
 	reg_vramaddr = val;
-	debugf("[HWIO] vram addr=%04x (PC:%06x)\n", reg_vramaddr, emu_pc());
+	// debugf("[HWIO] vram addr=%04x (PC:%06x)\n", reg_vramaddr, (unsigned int)emu_pc());
 }
 
 static void lspc_vram_modulo_w(uint16_t val) {

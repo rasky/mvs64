@@ -6,7 +6,7 @@ static uint8_t reg_rtc_tp;
 static int rtc_event_id;
 static int rtc_event_period;
 
-static unsigned int rtc_event_cb(void* arg) {
+static uint32_t rtc_event_cb(void* arg) {
 	reg_rtc_tp ^= 1;
 	debugf("[RTC] TP trigger: %x\n", reg_rtc_tp);
 	return rtc_event_period/2;

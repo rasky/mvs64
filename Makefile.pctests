@@ -1,6 +1,6 @@
 BUILD_DIR = build/pctests
 
-include n64.mk
+include n64rasky.mk
 
 emu_src = emu.c roms.c hw.c video.c m68kcpu.c m68kops.c m68kdasm.c platform_sdl.c
 emu_obj = $(emu_src:%.c=$(BUILD_DIR)/%.o)

@@ -10,7 +10,7 @@ N64_HEADERNAME = header
 
 N64_CFLAGS = -DN64 -falign-functions=32 -ffunction-sections -fdata-sections -std=gnu99 -march=vr4300 -mtune=vr4300 -O2 -Wall -Werror -fdiagnostics-color=always -I$(ROOTDIR)/mips64-elf/include
 N64_ASFLAGS = -mtune=vr4300 -march=vr4300 -Wa,--fatal-warnings
-N64_LDFLAGS = -L$(N64_ROOTDIR)/mips64-elf/lib -ldragon -lc -lm -ldragonsys -Tn64rasky.ld --gc-sections
+N64_LDFLAGS = -L$(N64_ROOTDIR)/mips64-elf/lib -ldragon -lc -lm -ldragonsys -Tn64.ld --gc-sections
 
 N64_CC = $(N64_GCCPREFIX)gcc
 N64_AS = $(N64_GCCPREFIX)as
@@ -62,6 +62,10 @@ ASFLAGS+=-MMD    # automatic .d dependency generation
 $(BUILD_DIR)/%.rsp: %.S
 	@echo "    [AS] $<"
 	$(N64_CC) $(N64_ASFLAGS) -nostartfiles -MMD -Wl,-Ttext=0x1000 -Wl,-Tdata=0x0 -o $@ $<
+
+$(BUILD_DIR)/%.o: %.S
+	@echo "    [AS] $<"
+	$(N64_CC) $(N64_ASFLAGS) -c -o $@ $<
 
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)

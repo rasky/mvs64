@@ -3,10 +3,9 @@
 #include <stdlib.h>
 #include <memory.h>
 #include "video.h"
+#include "roms.h"
 #include "hw.h"
 #include "platform.h"
-
-#define NIBBLE_SWAP(v_) ({ uint8_t v = (v_); (((v)>>4) | ((v)<<4)); })
 
 static uint32_t *g_screen_ptr;
 static int g_screen_pitch;
@@ -63,58 +62,6 @@ static void draw_sprite_4bpp_clip(uint8_t *src, uint32_t *pal, int x0, int y0, i
 	}
 }
 
-
-static void fixrom_preprocess(uint8_t *rom, int sz) {
-	uint8_t buf[4*8];
-
-	for (int i=0; i<sz; i+=4*8) {
-		uint8_t *c0 = &rom[16], *c1 = &rom[24], *c2 = &rom[0], *c3 = &rom[8];
-		uint8_t *d = buf;
-		for (int j=0;j<8;j++) {
-			*d++ = NIBBLE_SWAP(*c0++);
-			*d++ = NIBBLE_SWAP(*c1++);
-			*d++ = NIBBLE_SWAP(*c2++);
-			*d++ = NIBBLE_SWAP(*c3++);
-		}
-		memcpy(rom, buf, 4*8);
-		rom += 4*8;
-	}
-}
-
-static void crom_preprocess(uint8_t *rom0, int sz) {
-	uint8_t *buf0 = calloc(1, sz), *buf = buf0, *rom = rom0;
-	uint8_t *c1 = rom, *c2 = rom+sz/2;
-	
-	for (int i=0;i<sz;i+=8*16) {
-		for (int b=0;b<4;b++) {
-			uint8_t *dst = buf + (b&1)*64 + ((b^2)&2)*2;
-			for (int y=0;y<8;y++) {
-				for (int x=0;x<8;x+=2) {
-					uint8_t px4 = (c1[0] >> (x)) & 1;
-					uint8_t px5 = (c1[1] >> (x)) & 1;
-					uint8_t px6 = (c2[0] >> (x)) & 1;
-					uint8_t px7 = (c2[1] >> (x)) & 1;
-					uint8_t px0 = (c1[0] >> (x+1)) & 1;
-					uint8_t px1 = (c1[1] >> (x+1)) & 1;
-					uint8_t px2 = (c2[0] >> (x+1)) & 1;
-					uint8_t px3 = (c2[1] >> (x+1)) & 1;
-					dst[x/2] = (px7<<7)|(px6<<6)|(px5<<5)|(px4<<4)|(px3<<3)|(px2<<2)|(px1<<1)|(px0<<0);
-				}
-				c1 += 2; c2 += 2;
-				dst += 8;
-			}
-		}
-		buf += 8*16;
-	}
-
-	memcpy(rom0, buf0, sz);
-	free(buf0);
-
-	FILE *f = fopen("sprites.bin", "wb");
-	fwrite(rom0, 1, sz, f);
-	fclose(f);
-}
-
 static void render_fix(void) {
 	uint16_t *fix = VIDEO_RAM + 0x7000;
 
@@ -161,7 +108,7 @@ static void render_sprites(void) {
 
 			tnum |= (tc << 12) & 0xF0000;
 
-			uint8_t *src = C_ROM + tnum*8*16;
+			uint8_t *src = crom_get_sprite(tnum);
 			uint32_t *pal = CUR_PALETTE_RAM + ((tc >> 4) & 0xFF0);
 
 			draw_sprite_4bpp_clip(src, pal, sx, sy+i*16, 16, 16, tc&1, tc&2);
@@ -204,8 +151,10 @@ void video_palette_w(uint32_t address, uint32_t val, int sz) {
 	CUR_PALETTE_RAM[address] = (r << 16) | (g << 8) | b;
 }
 
+#include "m68k.h"
+
 uint32_t video_palette_r(uint32_t address, int sz) {
-	assert(sz == 2);
+	assertf(sz == 2, "video_palette_r access size %d %x %lx", sz, m68k_get_reg(NULL, M68K_REG_PC), C0_READ_EPC());
 	address &= 0x1FFF;
 	address /= 2;
 
@@ -219,12 +168,4 @@ uint32_t video_palette_r(uint32_t address, int sz) {
 	c16 |= (color >> 3) & 0x8000; // dark bit, should be identical across all colors
 
 	return c16;
-}
-
-void video_init(void) {
-	// Preprocess SROMs
-	fixrom_preprocess(SFIX_ROM, sizeof(SFIX_ROM));
-	fixrom_preprocess(S_ROM, sizeof(S_ROM));
-
-	crom_preprocess(C_ROM, C_ROM_SIZE);
 }
