@@ -178,13 +178,9 @@ int main(void) {
 		#endif
 		debugf("[PROFILE] ticks:%ld cpu:%.2f%% PC:%06x\n", tlen, (float)tlen * 100.f / (float)(TICKS_PER_SECOND / 60), m68k_get_reg(NULL, M68K_REG_PC));
 
-		#ifndef N64
-		uint8_t *screen; int pitch;
-
-		plat_beginframe(&screen, &pitch);
-		video_render((uint32_t*)screen, pitch);
+		plat_beginframe();
+		video_render();
 		plat_endframe();
-		#endif
 	}
 
 	debugf("end\n");

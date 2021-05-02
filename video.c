@@ -7,35 +7,35 @@
 #include "hw.h"
 #include "platform.h"
 
-static uint32_t *g_screen_ptr;
-static int g_screen_pitch;
-
 #ifdef N64
 #include "video_n64.c"
 #else
 #include "video_sdl.c"
 #endif
 
+static uint8_t PALETTE_DARK_BITS[8*1024/8];
+
 static void render_fix(void) {
 	uint16_t *fix = VIDEO_RAM + 0x7000;
+
+	render_begin_fix();
 
 	fix += 32; // skip first column
 	for (int i=0;i<38;i++) {
 		fix += 2; // skip two lines
 		for (int j=0;j<28;j++) {
 			uint16_t v = *fix++;
-
-			uint8_t *src = srom_get_sprite(v & 0xFFF);
-			uint32_t *pal = CUR_PALETTE_RAM + ((v >> 8) & 0xF0);
-
-			draw_sprite_4bpp(src, pal, i*8, j*8, 8, 8);
+			draw_sprite_fix(v & 0xFFF, (v >> 12) & 0xF, i*8, j*8);
 		}
 		fix += 2;
 	}
+
+	render_end_fix();
 }
 
 
 static void render_sprites(void) {
+	uint16_t *pram = PALETTE_RAM + PALETTE_RAM_BANK;
 	int sx = 0, sy = 0, ss = 0;
 
 	for (int snum=0;snum<381;snum++) {
@@ -54,7 +54,7 @@ static void render_sprites(void) {
 
 		if (ss == 0) continue;
 
-		debugf("[VIDEO] sprite snum:%d xc:%04x yc:%04x pos:%d,%d ss:%d chain:%d tmap:%04x:%04x\n", snum, xc, yc, sx, sy, ss, (yc & 0x40), tmap[0], tmap[1]);
+		// debugf("[VIDEO] sprite snum:%d xc:%04x yc:%04x pos:%d,%d ss:%d chain:%d tmap:%04x:%04x\n", snum, xc, yc, sx, sy, ss, (yc & 0x40), tmap[0], tmap[1]);
 
 		for (int i=0;i<ss;i++) {
 			uint32_t tnum = *tmap++;
@@ -63,22 +63,20 @@ static void render_sprites(void) {
 			tnum |= (tc << 12) & 0xF0000;
 
 			uint8_t *src = crom_get_sprite(tnum);
-			uint32_t *pal = CUR_PALETTE_RAM + ((tc >> 4) & 0xFF0);
+			uint16_t *pal = pram + ((tc >> 4) & 0xFF0);
 
-			draw_sprite_4bpp_clip(src, pal, sx, sy+i*16, 16, 16, tc&1, tc&2);
+			draw_sprite(src, pal, sx, sy+i*16, 16, 16, tc&1, tc&2);
 		}
 	}
 }
 
 
 
-void video_render(uint32_t* screen, int pitch) {
-	g_screen_ptr = screen;
-	g_screen_pitch = pitch;
-
-	clear_screen();
-	render_sprites();
+void video_render(void) {
+	render_begin();
+	(void)render_sprites;
 	render_fix();
+	render_end();
 }
 
 void video_palette_w(uint32_t address, uint32_t val, int sz) {
@@ -91,33 +89,39 @@ void video_palette_w(uint32_t address, uint32_t val, int sz) {
 	assert(sz == 2);
 	address &= 0x1FFF;
 	address /= 2;
+	address += PALETTE_RAM_BANK;
 
-	uint32_t r = ((val >> 6) & 0x3C) | ((val >> 13) & 2) | (val >> 15);
-	uint32_t g = ((val >> 2) & 0x3C) | ((val >> 12) & 2) | (val >> 15);
-	uint32_t b = ((val << 2) & 0x3C) | ((val >> 11) & 2) | (val >> 15);
+	uint16_t c16 = 0;
 
-	r = (r<<2) | (r>>4);
-	g = (g<<2) | (g>>4);
-	b = (b<<2) | (b>>4);
+	c16 |= ((val & 0x0F00) << 4) | ((val & 0x4000) >> 3);
+	c16 |= ((val & 0x00F0) << 3) | ((val & 0x2000) >> 7);
+	c16 |= ((val & 0x000F) << 2) | ((val & 0x1000) >> 11);
 
-	CUR_PALETTE_RAM[address] = (r << 16) | (g << 8) | b;
+	// All colors but index 0 of each palette have alpha set to 1.
+	if (address & 15) c16 |= 1;
+
+	// Store dark bit in a parallel data structure. This is required in case
+	// the game reads back the pallette RAM, to reconstruct the correct color.
+	PALETTE_DARK_BITS[address/8] &= ~(1 << (address%8));
+	PALETTE_DARK_BITS[address/8] |= (val>>15) << (address%8);
+
+	PALETTE_RAM[address] = c16;
 }
-
-#include "m68k.h"
 
 uint32_t video_palette_r(uint32_t address, int sz) {
 	assertf(sz == 2, "video_palette_r access size %d", sz);
 	address &= 0x1FFF;
 	address /= 2;
+	address += PALETTE_RAM_BANK;
 
-	uint32_t color = CUR_PALETTE_RAM[address];
-	uint16_t c16 = ((color >> 12) & 0xF00) | ((color >> 8) & 0xF0) | ((color >> 4) & 0xF);
+	uint16_t c16 = PALETTE_RAM[address];
 
-	c16 |= (color >> 5) & 0x4000;
-	c16 |= (color << 2) & 0x2000;
-	c16 |= (color << 9) & 0x1000;
+	uint16_t val = 0;
 
-	c16 |= (color >> 3) & 0x8000; // dark bit, should be identical across all colors
+	val |= ((c16 >> 4) & 0x0F00) | ((c16 << 3) & 0x4000);
+	val |= ((c16 >> 3) & 0x00F0) | ((c16 << 7) & 0x2000);
+	val |= ((c16 >> 2) & 0x000F) | ((c16 << 11) & 0x1000);
+	val |= (PALETTE_DARK_BITS[address/8] >> (address%8)) << 15;
 
-	return c16;
+	return val;
 }

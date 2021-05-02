@@ -65,6 +65,9 @@
 
 	extern const uint8_t *keystate;
 
+	extern uint8_t *g_screen_ptr;
+	extern int g_screen_pitch;
+
 #endif
 
 
@@ -76,8 +79,8 @@ void plat_enable_video(int enable);
 
 void plat_save_screenshot(const char *fn);
 
-void plat_beginframe(uint8_t **screen, int *pitch);
-void plat_endframe();
+void plat_beginframe(void);
+void plat_endframe(void);
 
 void plat_beginaudio(int16_t **buf, int *nsamples);
 void plat_endaudio(void);

@@ -10,8 +10,8 @@ extern uint8_t WORK_RAM[64*1024];
 extern uint8_t BACKUP_RAM[64*1024];
 extern uint16_t VIDEO_RAM[34*1024];
 
-extern uint32_t PALETTE_RAM[8*1024];  // two banks
-extern uint32_t *CUR_PALETTE_RAM;
+extern uint16_t PALETTE_RAM[8*1024];  // two banks
+extern int PALETTE_RAM_BANK;
 
 void hw_init(void);
 void hw_vblank(void);

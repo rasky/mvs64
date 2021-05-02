@@ -13,22 +13,56 @@ uint8_t P_ROM[2*1024*1024] __attribute__((aligned(256*1024)));
 
 uint8_t S_ROM[1024];
 uint8_t SFIX_ROM[1024];
+int srom_bank = -1;
+int srom_file = -1;
+const char* srom_fn[2] = {NULL, NULL};
 
-//static uint8_t crom_cache[(8*16) * 128] __attribute__((aligned(8)));
-// static int crom_cache_idx;
-// static int32_t crom_file;
+#define MAX_SROM_CACHE 128
 
-uint8_t* crom_get_sprite(int spritenum) {
-	return NULL;
-	// return crom_cache;
-}
+uint8_t srom_cache[MAX_SROM_CACHE * 8*4] __attribute__((aligned(16)));
+int srom_cache_index[MAX_SROM_CACHE];
+int srom_cache_next = 0;
 
 uint8_t* srom_get_sprite(int spritenum) {
-	return NULL;
-	// return crom_cache;
+	int idx;
+	for (idx=0;idx<MAX_SROM_CACHE;idx++) {
+		if (srom_cache_index[idx] == spritenum)
+			return srom_cache + idx*8*4;
+		if (srom_cache_index[idx] < 0)
+			break;
+	}
+
+	if (idx == MAX_SROM_CACHE)
+		idx = (srom_cache_next++) % MAX_SROM_CACHE;
+
+	uint8_t *dst = srom_cache + idx*8*4;
+
+	dfs_seek(srom_file, spritenum*8*4, SEEK_SET);
+	dfs_read(dst, 1, 8*4, srom_file);
+	data_cache_hit_writeback_invalidate(dst, 8*4);
+
+	srom_cache_index[idx] = spritenum;
+
+	return dst;
 }
 
 void srom_set_bank(int bank) {
+	assert(bank == 0 || bank == 1);
+	if (srom_bank != bank) {
+		srom_bank = bank;
+
+		if (srom_file != -1) dfs_close(srom_file);
+		srom_file = dfs_open(srom_fn[srom_bank]);
+		assertf(srom_file >= 0, "cannot open: %s", srom_fn[srom_bank]);
+
+		for (int i=0;i<MAX_SROM_CACHE;i++)
+			srom_cache_index[i] = -1;
+		srom_cache_next = 0;
+	}
+}
+
+uint8_t* crom_get_sprite(int spritenum) {
+	return NULL;
 }
 
 #else
@@ -133,7 +167,7 @@ void rom_load_bios(const char *dir) {
 	// rom(dir, "sp1-selftest.bin", 0, 128*1024, BIOS, true);
 	rom(dir, "sp-s2.sp1", 0, 128*1024, BIOS, true);
 	#ifdef N64
-	rom(dir, "sfix.n64.bin", 0, 128*1024, SFIX_ROM, false);
+	srom_fn[0] = "sfix.n64.bin";
 	#else
 	rom(dir, "sfix.sfix", 0, 128*1024, SFIX_ROM, false);
 	fixrom_preprocess(SFIX_ROM, 128*1024);
@@ -149,7 +183,7 @@ void rom_load_mslug(const char *dir) {
 	rom(dir, "201-p1.bin", 1*1024*1024, 1024*1024, P_ROM+0*1024*1024, true);
 	rom(dir, "201-p1.bin", 0*1024*1024, 1024*1024, P_ROM+1*1024*1024, true);
 	#ifdef N64
-	rom(dir, "201-s1.n64.bin", 0, 128*1024, S_ROM, false);
+	srom_fn[1] = "201-s1.n64.bin";
 	#else
 	rom(dir, "201-s1.bin", 0, 128*1024, S_ROM, false);
 	rom(dir, "201-c1.bin", 0, 4*1024*1024, C_ROM+0*4*1024*1024, false);

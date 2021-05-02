@@ -7,7 +7,7 @@
 static SDL_Window *screen;
 static SDL_Renderer *renderer;
 static SDL_Texture *frame;
-static uint8_t framebuf[320*224*4];
+static uint8_t framebuf[320*224*2];
 
 static int16_t *AUDIO_BUF[HW_AUDIO_NUMBUFFERS];
 static int audio_buf_index_w=1, audio_buf_index_r=0;
@@ -22,6 +22,9 @@ static clock_t fpsclock;
 static int fpscounter;
 static int g_audioenable;
 static int g_videoenable;
+
+uint8_t *g_screen_ptr;
+int g_screen_pitch;
 
 #define WINDOW_WIDTH 900
 
@@ -110,7 +113,7 @@ void plat_enable_video(int enable)
         SDL_RenderSetLogicalSize(renderer, 320, 224);
 
         frame = SDL_CreateTexture(renderer,
-                                  SDL_PIXELFORMAT_ARGB8888,
+                                  SDL_PIXELFORMAT_RGBA5551,
                                   SDL_TEXTUREACCESS_STREAMING,
                                   320, 224);
     }
@@ -124,10 +127,10 @@ void plat_enable_video(int enable)
     g_videoenable = enable;
 }
 
-void plat_beginframe(uint8_t **screen, int *pitch)
+void plat_beginframe(void)
 {
-    *screen = framebuf;
-    *pitch = 320*4;
+    g_screen_ptr = framebuf;
+    g_screen_pitch = 320*2;
 }
 
 void plat_endframe(void)
@@ -136,7 +139,7 @@ void plat_endframe(void)
     {
         if (audiocounter < framecounter)
         {
-            SDL_UpdateTexture(frame, NULL, framebuf, 320*4);
+            SDL_UpdateTexture(frame, NULL, framebuf, 320*2);
 
             SDL_RenderClear(renderer);
             SDL_RenderCopy(renderer, frame, NULL, NULL);
@@ -159,13 +162,16 @@ void plat_endframe(void)
     }
 
     framecounter += 1;
+
+    g_screen_ptr = NULL;
+    g_screen_pitch = 0;
 }
 
 void plat_save_screenshot(const char *fn)
 {
     SDL_Surface* saveSurface = SDL_CreateRGBSurfaceFrom(
-        framebuf, 320, 224, 32, 320*4,
-        0x00FF0000, 0x0000FF00, 0x00000FF, 0);
+        framebuf, 320, 224, 16, 320*2,
+        0x1F<<11, 0x1F<<6, 0x1F<<1, 0x1);
     assert(saveSurface);
     SDL_SaveBMP(saveSurface, fn);
     SDL_FreeSurface(saveSurface);

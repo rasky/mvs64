@@ -24,11 +24,11 @@ uint8_t P_ROM_VECTOR[0x80];
 uint8_t BIOS[128*1024];
 uint8_t WORK_RAM[64*1024] ALIGN_64K;
 uint8_t BACKUP_RAM[64*1024] ALIGN_64K;
-uint32_t PALETTE_RAM[8*1024];  // two banks
+uint16_t PALETTE_RAM[8*1024];  // two banks
 uint16_t VIDEO_RAM[34*1024];
 
 uint8_t *CUR_S_ROM;
-uint32_t *CUR_PALETTE_RAM;
+int PALETTE_RAM_BANK;
 
 typedef uint32_t (*ReadCB)(uint32_t addr, int sz);
 typedef void (*WriteCB)(uint32_t addr, uint32_t val, int sz);
@@ -97,7 +97,7 @@ uint32_t read_hwio(uint32_t addr, int sz)  {
 
 void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 #ifdef N64
-	if (addr != 0x3C0002)
+	if (addr != 0x3C0002 && addr != 0x3C0000)
 		debugf("[HWIO] write%d: %06x <- %0*x (68K PC:%x EPC:%lx)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, m68k_get_reg(NULL, M68K_REG_PC), C0_READ_EPC());
 #endif
 
@@ -113,8 +113,8 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 	} else if ((addr>>16) == 0x3A) switch (addr&0xFFFF) {
 		case 0x03: assert(sz==1); memcpy(P_ROM, BIOS, sizeof(P_ROM_VECTOR)); return;
 		case 0x13: assert(sz==1); memcpy(P_ROM, P_ROM_VECTOR, sizeof(P_ROM_VECTOR)); return;
-		case 0x0F: assert(sz==1); CUR_PALETTE_RAM = PALETTE_RAM + 0x1000; return;
-		case 0x1F: assert(sz==1); CUR_PALETTE_RAM = PALETTE_RAM + 0x0000; return;
+		case 0x0F: assert(sz==1); PALETTE_RAM_BANK = 0x1000; return;
+		case 0x1F: assert(sz==1); PALETTE_RAM_BANK = 0x0000; return;
 		case 0x0D: assert(sz==1); banks[0xD].w = write_unk; return;
 		case 0x1D: assert(sz==1); banks[0xD].w = NULL; return;
 		case 0x0B: assert(sz==1); srom_set_bank(0); return;
@@ -314,7 +314,7 @@ void tlb_map_area(unsigned int idx, uint32_t virt, uint32_t vmask, void* phys, b
 void hw_init(void) {
 	memset(banks, 0, sizeof(banks));
 	memcpy(P_ROM_VECTOR, P_ROM, sizeof(P_ROM_VECTOR));
-	CUR_PALETTE_RAM = PALETTE_RAM;
+	PALETTE_RAM_BANK = 0x0000;
 
 	banks[0x0] = (Bank){ P_ROM+0x000000,   0xFFFFF,   NULL,            write_unk };
 	banks[0x1] = (Bank){ WORK_RAM,         0x0FFFF,   NULL,            NULL };
