@@ -68,14 +68,12 @@ uint32_t read_hwio(uint32_t addr, int sz)  {
 		m68k_end_timeslice();
 	}
 
-#ifdef N64
-	if (addr != 0x3C0002)
-		debugf("[HWIO] read%d: %06x (68K PC:%x EPC:%lx)\n", sz*8, (unsigned int)addr, m68k_get_reg(NULL, M68K_REG_PC), C0_READ_EPC());
-#endif
+	// debugf("[HWIO] read%d: %06x (68K PC:%x)\n", sz*8, (unsigned int)addr, m68k_get_reg(NULL, M68K_REG_PC));
+	// debugf("[HWIO] read%d: %06x (68K PC:%x EPC:%lx)\n", sz*8, (unsigned int)addr, m68k_get_reg(NULL, M68K_REG_PC), C0_READ_EPC());
 
 	if ((addr>>16) == 0x30) switch (addr&0xFFFF) {
 		case 0x00: assert(sz==1); return input_p1cnt_r();
-		case 0x01: assert(sz==1); return 0xFF;
+		case 0x01: assert(sz==1); return 0xFF; // dipswitches
 
 	} else if ((addr>>16) == 0x32) switch (addr&0xFFFF) {
 		case 0x00: assert(sz==1); debugf("[HWIO] Read Z80 command\n"); return 1;
@@ -96,10 +94,12 @@ uint32_t read_hwio(uint32_t addr, int sz)  {
 }
 
 void write_hwio(uint32_t addr, uint32_t val, int sz)  {
-#ifdef N64
-	if (addr != 0x3C0002 && addr != 0x3C0000)
-		debugf("[HWIO] write%d: %06x <- %0*x (68K PC:%x EPC:%lx)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, m68k_get_reg(NULL, M68K_REG_PC), C0_READ_EPC());
-#endif
+	// if (addr != 0x3C0002 && addr != 0x3C0000)
+	// if (sz == 1) val &= 0xFF;
+	// if (sz == 2) val &= 0xFFFF;
+	// if (addr != 0x300001)
+	// debugf("[HWIO] write%d: %06x <- %0*x (68K PC:%x)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, m68k_get_reg(NULL, M68K_REG_PC));
+	// debugf("[HWIO] write%d: %06x <- %0*x (68K PC:%x EPC:%lx)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, m68k_get_reg(NULL, M68K_REG_PC), C0_READ_EPC());
 
 	if ((addr>>16) == 0x30) switch (addr&0xFFFF) {
 		case 0x01: return; // watchdog

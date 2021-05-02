@@ -48,8 +48,10 @@
 #define RdpLoadTlut(tidx, lowidx, highidx) \
     ((cast64(0x30)<<56) | (cast64(tidx) << 24) | (cast64(lowidx)<<46) | (cast64(highidx)<<14))
 
-#define RdpSetTileSize(tidx,s0,t0,s1,t1) \
-    ((cast64(0x32)<<56) | ((tidx)<<24) | ((s0)<<44) | ((t0)<<32) | ((s1)<<12) | ((t1)<<0))
+#define RdpSetTileSizeFX(tidx,s0,t0,s1,t1) \
+    ((cast64(0x32)<<56) | ((tidx)<<24) | (cast64(s0)<<44) | (cast64(t0)<<32) | ((s1)<<12) | ((t1)<<0))
+#define RdpSetTileSizeI(tidx,s0,t0,s1,t1) \
+    RdpSetTileSizeFX(tidx, (s0)<<2, (t0)<<2, (s1)<<2, (t1)<<2)
 
 #define RdpTextureRectangle1FX(tidx,x0,y0,x1,y1) \
     ((cast64(0x24)<<56) | (cast64((x1)&0xFFF)<<44) | (cast64((y1)&0xFFF)<<32) | ((tidx)<<24) | (((x0)&0xFFF)<<12) | (((y0)&0xFFF)<<0))
@@ -61,7 +63,7 @@
 #define RdpTextureRectangle2FX(s,t,ds,dt) \
     ((cast64((s))<<48) | (cast64((t))<<32) | ((ds)<<16) | ((dt)<<0))
 #define RdpTextureRectangle2I(s,t,ds,dt) \
-    RdpTextureRectangle2FX((s)<<5, (t)<<5, (ds)<<10, (dt)<<10)
+    RdpTextureRectangle2FX((s)<<5, (t)<<5, cast64((ds)&0x3F)<<10, cast64((dt)&0x3F)<<10)
 #define RdpTextureRectangle2F(s,t,ds,dt) \
     RdpTextureRectangle2FX((int32_t)((s)*32.f), (int32_t)((t)*32.f), (int32_t)((ds)*1024.f), (int32_t)((dt)*1024.f))
 
@@ -296,7 +298,8 @@
     RdpSetTile(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_4BIT, \
         (tmem_tex_pitch) < 0 ? (width)/8 : tmem_tex_pitch, \
         (tmem_tex_addr) < 0 ? -(tmem_tex_addr) * (width)*(height)/2/8 : tmem_tex_addr, tidx) \
-        | (((tmem_pal_addr)<0 ? -(tmem_pal_addr) : ((tmem_pal_addr)&0x780)>>7) << 20)
+        | (((tmem_pal_addr)<0 ? -(tmem_pal_addr) : ((tmem_pal_addr)&0x780)>>7) << 20), \
+    RdpSetTileSizeI(tidx, 0, 0, (width)-1, (height)-1)
 
 /**
  * MRdpDrawRect4bpp - Display list for drawing a 4bpp textured rectangle

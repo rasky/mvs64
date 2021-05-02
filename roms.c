@@ -61,8 +61,47 @@ void srom_set_bank(int bank) {
 	}
 }
 
+#define MAX_CROM_CACHE 128
+
+uint8_t crom_cache[MAX_CROM_CACHE * 8*16] __attribute__((aligned(16)));
+int crom_cache_index[MAX_CROM_CACHE];
+int crom_cache_next = 0;
+int crom_file = -1;
+const char* crom_fn[1] = {NULL};
+
 uint8_t* crom_get_sprite(int spritenum) {
-	return NULL;
+	int idx;
+	for (idx=0;idx<MAX_CROM_CACHE;idx++) {
+		if (crom_cache_index[idx] == spritenum)
+			return crom_cache + idx*8*16;
+		if (crom_cache_index[idx] < 0)
+			break;
+	}
+
+	if (idx == MAX_CROM_CACHE)
+		idx = (crom_cache_next++) % MAX_CROM_CACHE;
+
+	uint8_t *dst = crom_cache + idx*8*16;
+
+	dfs_seek(crom_file, spritenum*8*16, SEEK_SET);
+	dfs_read(dst, 1, 8*16, crom_file);
+	data_cache_hit_writeback_invalidate(dst, 8*16);
+
+	crom_cache_index[idx] = spritenum;
+
+	return dst;
+}
+
+void crom_set_bank(int bank) {
+	assert(bank == 0);
+
+	if (crom_file != -1) dfs_close(crom_file);
+	crom_file = dfs_open(crom_fn[bank]);
+	assertf(crom_file >= 0, "cannot open: %s", crom_fn[bank]);
+
+	for (int i=0;i<MAX_CROM_CACHE;i++)
+		crom_cache_index[i] = -1;
+	crom_cache_next = 0;
 }
 
 #else
@@ -184,6 +223,8 @@ void rom_load_mslug(const char *dir) {
 	rom(dir, "201-p1.bin", 0*1024*1024, 1024*1024, P_ROM+1*1024*1024, true);
 	#ifdef N64
 	srom_fn[1] = "201-s1.n64.bin";
+	crom_fn[0] = "201-c1.n64.bin";
+	crom_set_bank(0);
 	#else
 	rom(dir, "201-s1.bin", 0, 128*1024, S_ROM, false);
 	rom(dir, "201-c1.bin", 0, 4*1024*1024, C_ROM+0*4*1024*1024, false);
@@ -193,7 +234,7 @@ void rom_load_mslug(const char *dir) {
 	fixrom_preprocess(S_ROM, 128*1024);
 	crom_preprocess(C_ROM, 16*1024*1024);
 	FILE *f=fopen("201-s1.n64.bin", "wb");
-	fwrite(C_ROM, 128*1024, 1, f);
+	fwrite(S_ROM, 128*1024, 1, f);
 	fclose(f);
 	f=fopen("201-c1.n64.bin", "wb");
 	fwrite(C_ROM, 16*1024*1024, 1, f);

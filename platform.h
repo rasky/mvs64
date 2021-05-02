@@ -65,11 +65,10 @@
 
 	extern const uint8_t *keystate;
 
-	extern uint8_t *g_screen_ptr;
-	extern int g_screen_pitch;
-
 #endif
 
+extern uint8_t *g_screen_ptr;
+extern int g_screen_pitch;
 
 void plat_init(int audiofreq, int fps);
 int plat_poll(void);

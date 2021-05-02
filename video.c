@@ -9,6 +9,7 @@
 
 #ifdef N64
 #include "video_n64.c"
+// #include "video_sdl.c"
 #else
 #include "video_sdl.c"
 #endif
@@ -35,8 +36,9 @@ static void render_fix(void) {
 
 
 static void render_sprites(void) {
-	uint16_t *pram = PALETTE_RAM + PALETTE_RAM_BANK;
 	int sx = 0, sy = 0, ss = 0;
+
+	render_begin_sprites();
 
 	for (int snum=0;snum<381;snum++) {
 		// uint16_t zc = VIDEO_RAM[0x8000 + snum];
@@ -54,27 +56,32 @@ static void render_sprites(void) {
 
 		if (ss == 0) continue;
 
-		// debugf("[VIDEO] sprite snum:%d xc:%04x yc:%04x pos:%d,%d ss:%d chain:%d tmap:%04x:%04x\n", snum, xc, yc, sx, sy, ss, (yc & 0x40), tmap[0], tmap[1]);
+		int w = 16, h = 16;
+
+		if (sy >= 224 && sy+h <= 512) continue;
+		if (sx >= 320 && sx+w <= 512) continue;
+
+		debugf("[VIDEO] sprite snum:%d xc:%04x yc:%04x pos:%d,%d ss:%d chain:%d tmap:%04x:%04x\n", snum, xc, yc, sx, sy, ss, (yc & 0x40), tmap[0], tmap[1]);
 
 		for (int i=0;i<ss;i++) {
 			uint32_t tnum = *tmap++;
 			uint32_t tc = *tmap++;
 
 			tnum |= (tc << 12) & 0xF0000;
+			int palnum = ((tc >> 8) & 0xFF);
 
-			uint8_t *src = crom_get_sprite(tnum);
-			uint16_t *pal = pram + ((tc >> 4) & 0xFF0);
-
-			draw_sprite(src, pal, sx, sy+i*16, 16, 16, tc&1, tc&2);
+			draw_sprite(tnum, palnum, sx, sy+i*16, tc&1, tc&2);
 		}
 	}
+
+	render_end_sprites();
 }
 
 
 
 void video_render(void) {
 	render_begin();
-	(void)render_sprites;
+	render_sprites();
 	render_fix();
 	render_end();
 }

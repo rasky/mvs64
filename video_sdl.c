@@ -17,7 +17,15 @@ static void draw_sprite_fix(int spritenum, int palnum, int x, int y) {
 	}
 }
 
-static void draw_sprite(uint8_t *src, uint16_t *pal, int x0, int y0, int w, int h, bool flipx, bool flipy) {
+static void render_begin_sprites(void) {}
+static void render_end_sprites(void) {}
+
+
+static void draw_sprite(int spritenum, int palnum, int x0, int y0, bool flipx, bool flipy) {
+	const int w = 16, h = 16; 
+	uint8_t *src = crom_get_sprite(spritenum);
+	uint16_t *pal = PALETTE_RAM + PALETTE_RAM_BANK + palnum*16;
+
 	int src_y_inc = w/2, src_x_inc = 1, src_bpp_flip=0;
 	if (flipy) {
 		src += w*(h-1)/2;
