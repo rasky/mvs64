@@ -8,10 +8,13 @@
 #include "platform.h"
 
 #ifdef N64
-#include "video_n64.c"
-// #include "video_sdl.c"
+	#if 1
+	#include "video_n64.c"
+	#else
+	#include "video_cpu.c"
+	#endif
 #else
-#include "video_sdl.c"
+#include "video_cpu.c"
 #endif
 
 static uint8_t PALETTE_DARK_BITS[8*1024/8];
