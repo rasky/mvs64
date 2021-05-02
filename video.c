@@ -61,19 +61,21 @@ static void render_sprites(void) {
 
 		int w = 16, h = 16;
 
-		if (sy >= 224 && sy+h <= 512) continue;
 		if (sx >= 320 && sx+w <= 512) continue;
 
-		debugf("[VIDEO] sprite snum:%d xc:%04x yc:%04x pos:%d,%d ss:%d chain:%d tmap:%04x:%04x\n", snum, xc, yc, sx, sy, ss, (yc & 0x40), tmap[0], tmap[1]);
+		// debugf("[VIDEO] sprite snum:%d xc:%04x yc:%04x pos:%d,%d ss:%d chain:%d tmap:%04x:%04x\n", snum, xc, yc, sx, sy, ss, (yc & 0x40), tmap[0], tmap[1]);
 
 		for (int i=0;i<ss;i++) {
+			int ssy = (sy+i*16) & 511;
 			uint32_t tnum = *tmap++;
 			uint32_t tc = *tmap++;
+
+			if (ssy >= 224 && ssy+h <= 512) continue;
 
 			tnum |= (tc << 12) & 0xF0000;
 			int palnum = ((tc >> 8) & 0xFF);
 
-			draw_sprite(tnum, palnum, sx, sy+i*16, tc&1, tc&2);
+			draw_sprite(tnum, palnum, sx, ssy, tc&1, tc&2);
 		}
 	}
 
