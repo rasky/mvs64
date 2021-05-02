@@ -46,7 +46,8 @@ static Bank banks[16];
 #include "lspc.c"
 #include "input.c"
 
-#define DIPSW_SETTINGS_MODE    0x1
+#define DIPSW_SETTINGS_MODE    (1<<0)
+#define DIPSW_FREEPLAY         (1<<6)
 
 static void write_unk(uint32_t addr, uint32_t val, int sz) {
 	debugf("[MEM] unknown write%d: %06x <- %0*x\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val);
@@ -73,7 +74,7 @@ uint32_t read_hwio(uint32_t addr, int sz)  {
 
 	if ((addr>>16) == 0x30) switch (addr&0xFFFF) {
 		case 0x00: assert(sz==1); return input_p1cnt_r();
-		case 0x01: assert(sz==1); return 0xFF; // dipswitches
+		case 0x01: assert(sz==1); return 0xFF ^ DIPSW_FREEPLAY; // dipswitches
 
 	} else if ((addr>>16) == 0x32) switch (addr&0xFFFF) {
 		case 0x00: assert(sz==1); debugf("[HWIO] Read Z80 command\n"); return 1;
