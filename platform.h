@@ -41,7 +41,7 @@
 	#define assertf(cond, msg, ...) ({ \
 		if (!(cond)) { \
 			fprintf(stderr, "ASSERTION FAILED:\n"); \
-			fprintf(stderr, msg "\n", __VA_ARGS__); \
+			fprintf(stderr, msg "\n", ##__VA_ARGS__); \
 			assert(cond); \
 		} \
 	})

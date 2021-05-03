@@ -27,7 +27,6 @@ uint8_t BACKUP_RAM[64*1024] ALIGN_64K;
 uint16_t PALETTE_RAM[8*1024];  // two banks
 uint16_t VIDEO_RAM[34*1024];
 
-uint8_t *CUR_S_ROM;
 int PALETTE_RAM_BANK;
 
 typedef uint32_t (*ReadCB)(uint32_t addr, int sz);

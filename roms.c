@@ -6,44 +6,70 @@
 #include "platform.h"
 #include "hw.h"
 #include "roms.h"
+#include "sprite_cache.h"
 
 #ifdef N64
-
 uint8_t P_ROM[2*1024*1024] __attribute__((aligned(256*1024)));
+#else
+uint8_t P_ROM[2*1024*1024];
+#endif
 
-uint8_t S_ROM[1024];
-uint8_t SFIX_ROM[1024];
-int srom_bank = -1;
-int srom_file = -1;
-const char* srom_fn[2] = {NULL, NULL};
+static SpriteCache srom_cache;
+static SpriteCache crom_cache;
 
-#define MAX_SROM_CACHE 128
+static const char* srom_fn[2] = {NULL, NULL};
+static const char* crom_fn[1] = {NULL};
+static int srom_bank = -1;
 
-uint8_t srom_cache[MAX_SROM_CACHE * 8*4] __attribute__((aligned(16)));
-int srom_cache_index[MAX_SROM_CACHE];
-int srom_cache_next = 0;
+#ifdef N64
+static int crom_file = -1;
+static int srom_file = -1;
+#else
+static FILE *crom_file = NULL;
+static FILE *srom_file = NULL;
+#endif
+
+static void rom_cache_init(void) {
+	sprite_cache_init(&srom_cache, 4*8, 256);
+	sprite_cache_init(&crom_cache, 8*16, 512);
+}
 
 uint8_t* srom_get_sprite(int spritenum) {
-	int idx;
-	for (idx=0;idx<MAX_SROM_CACHE;idx++) {
-		if (srom_cache_index[idx] == spritenum)
-			return srom_cache + idx*8*4;
-		if (srom_cache_index[idx] < 0)
-			break;
-	}
+	uint8_t *pix = sprite_cache_lookup(&srom_cache, spritenum);
+	if (pix) return pix;
 
-	if (idx == MAX_SROM_CACHE)
-		idx = (srom_cache_next++) % MAX_SROM_CACHE;
+	pix = sprite_cache_insert(&srom_cache, spritenum);
+	assertf(pix, "SROM cache is full");
 
-	uint8_t *dst = srom_cache + idx*8*4;
+	#ifdef N64
+	dfs_seek(srom_file, spritenum*4*8, SEEK_SET);
+	dfs_read(pix, 1, 4*8, srom_file);
+	data_cache_hit_writeback_invalidate(pix, 4*8);    // FIXME: should not be required
+	#else
+	fseek(srom_file, spritenum*4*8, SEEK_SET);
+	fread(pix, 1, 4*8, srom_file);
+	#endif
 
-	dfs_seek(srom_file, spritenum*8*4, SEEK_SET);
-	dfs_read(dst, 1, 8*4, srom_file);
-	data_cache_hit_writeback_invalidate(dst, 8*4);
+	return pix;
+}
 
-	srom_cache_index[idx] = spritenum;
+uint8_t* crom_get_sprite(int spritenum) {
+	uint8_t *pix = sprite_cache_lookup(&crom_cache, spritenum);
+	if (pix) return pix;
 
-	return dst;
+	pix = sprite_cache_insert(&crom_cache, spritenum);
+	assertf(pix, "CROM cache is full");
+
+	#ifdef N64
+	dfs_seek(crom_file, spritenum*8*16, SEEK_SET);
+	dfs_read(pix, 1, 8*16, crom_file);
+	data_cache_hit_writeback_invalidate(pix, 8*16);  // FIXME: should not be required
+	#else
+	fseek(crom_file, spritenum*8*16, SEEK_SET);
+	fread(pix, 1, 8*16, crom_file);
+	#endif
+
+	return pix;
 }
 
 void srom_set_bank(int bank) {
@@ -51,67 +77,37 @@ void srom_set_bank(int bank) {
 	if (srom_bank != bank) {
 		srom_bank = bank;
 
+		#ifdef N64
 		if (srom_file != -1) dfs_close(srom_file);
 		srom_file = dfs_open(srom_fn[srom_bank]);
 		assertf(srom_file >= 0, "cannot open: %s", srom_fn[srom_bank]);
+		#else
+		if (srom_file) fclose(srom_file);
+		srom_file = fopen(srom_fn[bank], "rb");
+		assertf(srom_file, "cannot open: %s", srom_fn[bank]);
+		#endif
 
-		for (int i=0;i<MAX_SROM_CACHE;i++)
-			srom_cache_index[i] = -1;
-		srom_cache_next = 0;
+		sprite_cache_reset(&srom_cache);
 	}
-}
-
-#define MAX_CROM_CACHE 128
-
-uint8_t crom_cache[MAX_CROM_CACHE * 8*16] __attribute__((aligned(16)));
-int crom_cache_index[MAX_CROM_CACHE];
-int crom_cache_next = 0;
-int crom_file = -1;
-const char* crom_fn[1] = {NULL};
-
-uint8_t* crom_get_sprite(int spritenum) {
-	int idx;
-	for (idx=0;idx<MAX_CROM_CACHE;idx++) {
-		if (crom_cache_index[idx] == spritenum)
-			return crom_cache + idx*8*16;
-		if (crom_cache_index[idx] < 0)
-			break;
-	}
-
-	if (idx == MAX_CROM_CACHE)
-		idx = (crom_cache_next++) % MAX_CROM_CACHE;
-
-	uint8_t *dst = crom_cache + idx*8*16;
-
-	dfs_seek(crom_file, spritenum*8*16, SEEK_SET);
-	dfs_read(dst, 1, 8*16, crom_file);
-	data_cache_hit_writeback_invalidate(dst, 8*16);
-
-	crom_cache_index[idx] = spritenum;
-
-	return dst;
 }
 
 void crom_set_bank(int bank) {
 	assert(bank == 0);
 
+	#ifdef N64
 	if (crom_file != -1) dfs_close(crom_file);
 	crom_file = dfs_open(crom_fn[bank]);
 	assertf(crom_file >= 0, "cannot open: %s", crom_fn[bank]);
+	#else
+	if (crom_file) fclose(crom_file);
+	crom_file = fopen(crom_fn[bank], "rb");
+	assertf(crom_file, "cannot open: %s", crom_fn[bank]);
+	#endif
 
-	for (int i=0;i<MAX_CROM_CACHE;i++)
-		crom_cache_index[i] = -1;
-	crom_cache_next = 0;
+	sprite_cache_reset(&crom_cache);
 }
 
-#else
-
-uint8_t P_ROM[5*1024*1024];
-uint8_t S_ROM[128*1024];
-uint8_t SFIX_ROM[128*1024];
-static uint8_t C_ROM[64*1024*1024];
-static uint8_t *CUR_S_ROM;
-
+#if 0
 static void fixrom_preprocess(uint8_t *rom, int sz) {
 	#define NIBBLE_SWAP(v_) ({ uint8_t v = (v_); (((v)>>4) | ((v)<<4)); })
 	uint8_t buf[4*8];
@@ -163,22 +159,6 @@ static void crom_preprocess(uint8_t *rom0, int sz) {
 	fwrite(rom0, 1, sz, f);
 	fclose(f);
 }
-
-uint8_t* crom_get_sprite(int spritenum) {
-	return C_ROM + ((spritenum*8*16) & (sizeof(C_ROM)-1));
-}
-
-uint8_t* srom_get_sprite(int spritenum) {
-	return CUR_S_ROM + spritenum*8*4;
-}
-
-void srom_set_bank(int bank) {
-	if (bank)
-		CUR_S_ROM = S_ROM;
-	else
-		CUR_S_ROM = SFIX_ROM;
-}
-
 #endif
 
 static void rom(const char *dir, const char* name, int off, int sz, uint8_t *buf, bool bswap) {
@@ -202,12 +182,19 @@ static void rom(const char *dir, const char* name, int off, int sz, uint8_t *buf
 	}
 }
 
+void rom_next_frame(void) {
+	sprite_cache_tick(&srom_cache);
+	sprite_cache_tick(&crom_cache);
+}
+
 void rom_load_bios(const char *dir) {
 	// rom(dir, "sp1-selftest.bin", 0, 128*1024, BIOS, true);
-	rom(dir, "sp-s2.sp1", 0, 128*1024, BIOS, true);
-	#ifdef N64
+	// rom(dir, "sp-s2.sp1", 0, 128*1024, BIOS, true);
+	rom(dir, "uni-bios_2_3o.rom", 0, 128*1024, BIOS, true);
+
 	srom_fn[0] = "sfix.n64.bin";
-	#else
+
+	#if 0
 	rom(dir, "sfix.sfix", 0, 128*1024, SFIX_ROM, false);
 	fixrom_preprocess(SFIX_ROM, 128*1024);
 	FILE *f=fopen("sfix.n64.bin", "wb");
@@ -215,17 +202,19 @@ void rom_load_bios(const char *dir) {
 	fclose(f);
 	#endif
 
+	rom_cache_init();
 	srom_set_bank(0);  // Set SFIX as current
 }
 
 void rom_load_mslug(const char *dir) {
 	rom(dir, "201-p1.bin", 1*1024*1024, 1024*1024, P_ROM+0*1024*1024, true);
 	rom(dir, "201-p1.bin", 0*1024*1024, 1024*1024, P_ROM+1*1024*1024, true);
-	#ifdef N64
+
 	srom_fn[1] = "201-s1.n64.bin";
 	crom_fn[0] = "201-c1.n64.bin";
 	crom_set_bank(0);
-	#else
+
+	#if 0
 	rom(dir, "201-s1.bin", 0, 128*1024, S_ROM, false);
 	rom(dir, "201-c1.bin", 0, 4*1024*1024, C_ROM+0*4*1024*1024, false);
 	rom(dir, "201-c3.bin", 0, 4*1024*1024, C_ROM+1*4*1024*1024, false);
@@ -241,7 +230,7 @@ void rom_load_mslug(const char *dir) {
 	fclose(f);
 	#endif
 }
-
+#if 0
 void rom_load_kof98(const char *dir) {
 	rom(dir, "kof98_p1.rom", 0, 1024*1024, P_ROM+0*1024*1024, true);
 	rom(dir, "kof98_p2.rom", 0, 4*1024*1024, P_ROM+1*1024*1024, true);
@@ -320,4 +309,4 @@ void rom_load_krom(const char *dir) {
 	crom_preprocess(C_ROM, 2*1024*1024);
 	#endif
 }
-
+#endif

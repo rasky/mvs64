@@ -2,7 +2,7 @@ BUILD_DIR = build/mvs64
 
 include n64rasky.mk
 
-src = emu.c roms.c hw.c video.c m68kcpu.c m68kops.c platform_n64.c m68kdasm.c lib/rdl.c
+src = emu.c roms.c hw.c video.c m68kcpu.c m68kops.c platform_n64.c m68kdasm.c sprite_cache.c lib/rdl.c
 rsp = 
 asm = hw_n64.S
 obj = $(src:%.c=$(BUILD_DIR)/%.o) $(asm:%.S=$(BUILD_DIR)/%.o) $(rsp:%.S=$(BUILD_DIR)/%.text.o) $(rsp:%.S=$(BUILD_DIR)/%.data.o)

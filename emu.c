@@ -143,7 +143,7 @@ int main(void) {
 	rom_load_mslug("rom:/");
 	#else
 	rom_load_bios("roms/bios/");
-	rom_load_mslug("roms/mslug/");
+	rom_load_mslug("roms/mslug64/");
 	// rom_load_aof("roms/aof/");
 	// rom_load_kof98("roms/kof98/");
 	// rom_load_samsho("roms/samsho/");
@@ -181,6 +181,8 @@ int main(void) {
 		plat_beginframe();
 		video_render();
 		plat_endframe();
+
+		rom_next_frame();
 	}
 
 	debugf("end\n");

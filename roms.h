@@ -18,4 +18,6 @@ uint8_t* srom_get_sprite(int spritenum);
 
 void srom_set_bank(int bank);  // 0 = fixed (BIOS), 1 = game
 
+void rom_next_frame(void);
+
 #endif
