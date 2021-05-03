@@ -1,0 +1,29 @@
+BUILD_DIR = build/mvs64
+
+include n64rasky.mk
+
+src = emu.c roms.c hw.c video.c m68kcpu.c m68kops.c platform_n64.c m68kdasm.c lib/rdl.c
+rsp = 
+asm = hw_n64.S
+obj = $(src:%.c=$(BUILD_DIR)/%.o) $(asm:%.S=$(BUILD_DIR)/%.o) $(rsp:%.S=$(BUILD_DIR)/%.text.o) $(rsp:%.S=$(BUILD_DIR)/%.data.o)
+
+all: mvs64.z64
+test:
+	make -f Makefile.tests all
+
+mvs64.dfs: $(wildcard roms/mslug64/*)
+mvs64.z64: mvs64.dfs
+mvs64.z64: N64_ROM_TITLE="MVS64"
+mvs64.elf: $(obj)
+
+clean:
+	rm -f $(obj)
+	rm -f $(asm:%.S=$(BUILD_DIR)/%.o)
+	rm -f $(rsp:%.S=$(BUILD_DIR)/%.rsp)
+	rm -f $(src:%.c=$(BUILD_DIR)/%.d) $(asm:%.S=$(BUILD_DIR)/%.d)
+	rm -f mvs64.elf
+	rm -f mvs64.dfs
+
+-include $(src:%.c=$(BUILD_DIR)/%.d) $(asm:%.S=$(BUILD_DIR)/%.d)
+
+.PHONY: clean test
