@@ -195,6 +195,10 @@
 #define SOM_SAMPLE_2X2         (cast64(1)<<45)
 #define SOM_MIDTEXEL           (cast64(1)<<44)
 
+#define SOM_TC_FILTER          (cast64(0)<<41)  // NOTE: this values are bit-inverted, so that they end up with a good default
+#define SOM_TC_FILTERCONV      (cast64(3)<<41)
+#define SOM_TC_CONV            (cast64(6)<<41)
+
 #define SOM_RGBDITHER_SQUARE   ((cast64(0))<<38)
 #define SOM_RGBDITHER_BAYER    ((cast64(1))<<38)
 #define SOM_RGBDITHER_NOISE    ((cast64(2))<<38)
@@ -211,7 +215,7 @@
 #define SOM_ALPHA_COMPARE      (1<<0)
 
 #define RdpSetOtherModes(som_flags) \
-    ((cast64(0x2f)<<56) | (som_flags))
+    ((cast64(0x2f)<<56) | ((som_flags) ^ (cast64(6)<<41)))
 
 #define RdpSyncFull() \
     (cast64(0x29)<<56)
@@ -273,7 +277,7 @@
  *
  */
 #define MRdpLoadPalette16(tidx, rdram_addr, tmem_addr) \
-    RdpSetTile(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_4BIT, 16, (tmem_addr) <= 0 ? (0x800 + -(tmem_addr)*(16*2*4))/8 : tmem_addr, tidx), \
+    RdpSetTile(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_4BIT, 16, ((tmem_addr) <= 0 ? (0x800 + -(tmem_addr)*(16*2*4)) : tmem_addr)/8, tidx), \
     RdpSetTexImage(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_16BIT, rdram_addr, 16), \
     RdpLoadTlut(tidx, 0, 15)
 
