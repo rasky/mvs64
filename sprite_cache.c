@@ -68,6 +68,7 @@ void sprite_cache_reset(SpriteCache *c) {
 // as recently used for LRU calculation. Can be incremented every frame.
 void sprite_cache_tick(SpriteCache *c) {
 	c->cur_tick++;
+	c->tick_cutoff = c->cur_tick-1;
 }
 
 static SpriteCacheEntry** bucket_ptr(SpriteCache *c, uint32_t key) {
@@ -106,8 +107,6 @@ void sprite_cache_pop(SpriteCache *c) {
 	int bidx = rand() & (c->num_buckets-1);
 	bool removed_one = false;
 
-	#define TICK_CUTOFF  1
-
 	// Go through all buckets, starting from a random one, until we managed
 	// to remove at least one entry.
 	for (int i=0;i<c->num_buckets && !removed_one;i++) {
@@ -118,7 +117,7 @@ void sprite_cache_pop(SpriteCache *c) {
 		// ticks older than the current tick).
 		// We go through the while bucket to amortize the cost of removal.
 		while (*bkt) {
-			if ((*bkt)->last_tick < c->cur_tick-TICK_CUTOFF) {
+			if ((*bkt)->last_tick < c->tick_cutoff) {
 				SpriteCacheEntry *e = *bkt;
 
 				// Disconnect the entry from the bucket list
@@ -135,6 +134,13 @@ void sprite_cache_pop(SpriteCache *c) {
 		}
 
 		bidx = (bidx+1) & (c->num_buckets-1);
+	}
+
+	if (c->tick_cutoff <= c->cur_tick)
+	{
+		c->tick_cutoff++;
+		sprite_cache_pop(c);
+		return;
 	}
 }
 
