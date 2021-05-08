@@ -107,8 +107,7 @@ void crom_set_bank(int bank) {
 	sprite_cache_reset(&crom_cache);
 }
 
-#if 0
-static void fixrom_preprocess(uint8_t *rom, int sz) {
+void fixrom_preprocess(uint8_t *rom, int sz) {
 	#define NIBBLE_SWAP(v_) ({ uint8_t v = (v_); (((v)>>4) | ((v)<<4)); })
 	uint8_t buf[4*8];
 
@@ -126,7 +125,7 @@ static void fixrom_preprocess(uint8_t *rom, int sz) {
 	}
 }
 
-static void crom_preprocess(uint8_t *rom0, int sz) {
+void crom_preprocess(uint8_t *rom0, int sz) {
 	uint8_t *buf0 = calloc(1, sz), *buf = buf0, *rom = rom0;
 	uint8_t *c1 = rom, *c2 = rom+sz/2;
 	
@@ -154,12 +153,7 @@ static void crom_preprocess(uint8_t *rom0, int sz) {
 
 	memcpy(rom0, buf0, sz);
 	free(buf0);
-
-	FILE *f = fopen("sprites.bin", "wb");
-	fwrite(rom0, 1, sz, f);
-	fclose(f);
 }
-#endif
 
 static void rom(const char *dir, const char* name, int off, int sz, uint8_t *buf, bool bswap) {
 	char fullname[1024];
@@ -190,9 +184,15 @@ void rom_next_frame(void) {
 void rom_load_bios(const char *dir) {
 	// rom(dir, "sp1-selftest.bin", 0, 128*1024, BIOS, true);
 	// rom(dir, "sp-s2.sp1", 0, 128*1024, BIOS, true);
-	rom(dir, "uni-bios_2_3o.rom", 0, 128*1024, BIOS, true);
+	rom(dir, "uni-bios.rom", 0, 128*1024, BIOS, true);
 
 	srom_fn[0] = "sfix.n64.bin";
+
+	#if 0
+	FILE *f=fopen("uni-bios.n64.bin", "wb");
+	fwrite(BIOS, 1, 128*1024, f);
+	fclose(f);
+	#endif
 
 	#if 0
 	rom(dir, "sfix.sfix", 0, 128*1024, SFIX_ROM, false);
@@ -209,6 +209,12 @@ void rom_load_bios(const char *dir) {
 void rom_load_mslug(const char *dir) {
 	rom(dir, "201-p1.bin", 1*1024*1024, 1024*1024, P_ROM+0*1024*1024, true);
 	rom(dir, "201-p1.bin", 0*1024*1024, 1024*1024, P_ROM+1*1024*1024, true);
+
+	#ifndef N64
+	FILE *f = fopen("201-p1.n64.bin", "wb");
+	fwrite(P_ROM, 1, 2*1024*1024, f);
+	fclose(f);
+	#endif
 
 	srom_fn[1] = "201-s1.n64.bin";
 	crom_fn[0] = "201-c1.n64.bin";
@@ -248,35 +254,74 @@ void rom_load_kof98(const char *dir) {
 	crom_preprocess(C_ROM, 64*1024*1024);
 	#endif
 }
+#endif
 
 void rom_load_aof(const char *dir) {
-	rom(dir, "044-p1.bin", 0, 512*1024, P_ROM, true);
-	rom(dir, "044-s1.bin", 0, 128*1024, S_ROM, false);
 	#ifndef N64
-	rom(dir, "044-c1.bin", 0, 2*1024*1024, C_ROM+0*2*1024*1024, false);
-	rom(dir, "044-c3.bin", 0, 2*1024*1024, C_ROM+1*2*1024*1024, false);
-	rom(dir, "044-c2.bin", 0, 2*1024*1024, C_ROM+2*2*1024*1024, false);
-	rom(dir, "044-c4.bin", 0, 2*1024*1024, C_ROM+3*2*1024*1024, false);
-	fixrom_preprocess(S_ROM, 128*1024);
-	crom_preprocess(C_ROM, 8*1024*1024);
+	if (true) {
+		uint8_t *srom = malloc(128*1024);
+		rom(dir, "044-s1.bin", 0, 128*1024, srom, false);
+		fixrom_preprocess(srom, 128*1024);
+		FILE *f = fopen("044-s1.n64.bin", "wb");
+		fwrite(srom, 128*1024, 1, f);
+		fclose(f);
+		free(srom);
+	}
+	if (true) {
+		uint8_t *crom = malloc(8*1024*1024);
+		rom(dir, "044-c1.bin", 0, 2*1024*1024, crom+0*2*1024*1024, false);
+		rom(dir, "044-c3.bin", 0, 2*1024*1024, crom+1*2*1024*1024, false);
+		rom(dir, "044-c2.bin", 0, 2*1024*1024, crom+2*2*1024*1024, false);
+		rom(dir, "044-c4.bin", 0, 2*1024*1024, crom+3*2*1024*1024, false);
+		crom_preprocess(crom, 8*1024*1024);
+		FILE *f = fopen("044-c1.n64.bin", "wb");
+		fwrite(crom, 8*1024*1024, 1, f);
+		fclose(f);
+		free(crom);
+	}
 	#endif
+
+	rom(dir, "044-p1.bin", 0, 512*1024, P_ROM, true);
+	srom_fn[1] = "044-s1.n64.bin";
+	crom_fn[0] = "044-c1.n64.bin";
+	crom_set_bank(0);
 }
 
 void rom_load_samsho(const char *dir) {
-	rom(dir, "045-p1.bin", 0, 1024*1024, P_ROM, true);
-	rom(dir, "045-s1.bin", 0, 128*1024, S_ROM, false);
 	#ifndef N64
-	rom(dir, "045-c1.bin", 0, 2*1024*1024, C_ROM+0*2*1024*1024, false);
-	rom(dir, "045-c3.bin", 0, 2*1024*1024, C_ROM+1*2*1024*1024, false);
-	rom(dir, "045-c51.bin", 0, 1*1024*1024, C_ROM+2*2*1024*1024, false);
-	rom(dir, "045-c2.bin", 0, 2*1024*1024, C_ROM+3*2*1024*1024, false);
-	rom(dir, "045-c4.bin", 0, 2*1024*1024, C_ROM+4*2*1024*1024, false);
-	rom(dir, "045-c61.bin", 0, 1*1024*1024, C_ROM+5*2*1024*1024, false);
-	fixrom_preprocess(S_ROM, 128*1024);
-	crom_preprocess(C_ROM, 12*1024*1024);
+	if (true) {
+		uint8_t *srom = malloc(128*1024);
+		rom(dir, "045-s1.bin", 0, 128*1024, srom, false);
+		fixrom_preprocess(srom, 128*1024);
+		FILE *f = fopen("045-s1.n64.bin", "wb");
+		fwrite(srom, 128*1024, 1, f);
+		fclose(f);
+		free(srom);
+	}
+	if (true) {
+		uint8_t *crom = calloc(12*1024*1024, 1);
+		rom(dir, "045-c1.bin", 0, 2*1024*1024, crom+0*2*1024*1024, false);
+		rom(dir, "045-c3.bin", 0, 2*1024*1024, crom+1*2*1024*1024, false);
+		rom(dir, "045-c51.bin", 0, 1*1024*1024, crom+2*2*1024*1024, false);
+		rom(dir, "045-c2.bin", 0, 2*1024*1024, crom+3*2*1024*1024, false);
+		rom(dir, "045-c4.bin", 0, 2*1024*1024, crom+4*2*1024*1024, false);
+		rom(dir, "045-c61.bin", 0, 1*1024*1024, crom+5*2*1024*1024, false);
+		crom_preprocess(crom, 12*1024*1024);
+		FILE *f = fopen("045-c1.n64.bin", "wb");
+		fwrite(crom, 12*1024*1024, 1, f);
+		fclose(f);
+		free(crom);
+	}
 	#endif
+
+	rom(dir, "045-p1.bin", 0, 1024*1024, P_ROM, true);
+	rom(dir, "045-pg2.bin", 0, 1024*1024, P_ROM+1024*1024, true);
+	srom_fn[1] = "045-s1.n64.bin";
+	crom_fn[0] = "045-c1.n64.bin";
+	crom_set_bank(0);
 }
 
+#if 0
 void rom_load_nyanmvs(const char *dir) {
 	rom(dir, "052-p1.bin", 0, 128*1024, P_ROM, false);
 	rom(dir, "052-s1.bin", 0, 128*1024, S_ROM, false);
