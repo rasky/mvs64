@@ -35,9 +35,9 @@ static void lspc_vram_modulo_w(uint16_t val) {
 
 static uint16_t lspc_mode_r() {
 	int64_t clk = emu_clock_frame();
-	int line = clk % (MVS_CLOCK / FPS / 264);
+	int line = clk / (MVS_CLOCK / FPS / 264);
 
-	return ((line+0xF8) << 9) | (lspc_aa_counter & 7);
+	return ((line+0xF8) << 7) | (lspc_aa_counter & 7);
 }
 
 static void lspc_mode_w(uint16_t val) {
