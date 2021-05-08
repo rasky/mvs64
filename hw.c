@@ -279,7 +279,7 @@ void tlb_map_area(unsigned int idx, uint32_t virt, uint32_t vmask, void* phys, b
 	uint32_t existing = C0_INDEX();
 	uint32_t exentry0 = C0_ENTRYLO0();
 	uint32_t exentry1 = C0_ENTRYLO1();
-	assertf((existing & 0x80000000) || (((exentry0|exentry1) & 2) == 0), "Duplicated TLB entry with physical page %08lx (%lx/%lx)", vpn2, exentry0, exentry1);
+	assertf((existing & 0x80000000) || (((exentry0|exentry1) & 2) == 0), "Duplicated TLB entry with vaddr %08lx (%lx/%lx)", vpn2, exentry0, exentry1);
 
 	if (dbl || !(virt & (vmask+1))) {	
 		uint32_t entry = ((uint32_t)phys & 0x3FFFFFFF) >> 6;
