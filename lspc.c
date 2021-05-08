@@ -30,7 +30,7 @@ static void lspc_vram_addr_w(uint32_t val, int sz) {
 
 static void lspc_vram_modulo_w(uint16_t val) {
 	reg_vrammod = val;
-	debugf("[HWIO] vram mod=%02x\n", reg_vrammod); 
+	// debugf("[HWIO] vram mod=%02x\n", reg_vrammod	); 
 }
 
 static uint16_t lspc_mode_r() {
