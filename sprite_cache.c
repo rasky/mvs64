@@ -1,4 +1,5 @@
 #include "sprite_cache.h"
+#include "platform.h"
 #include <memory.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -29,9 +30,11 @@ void sprite_cache_init(SpriteCache *c, int sprite_size, int max_sprites) {
 	// to do direct DMA from cartridge ROM, but we force 16-byte as it costs virtually
 	// nothing and it also allows faster memory invalidations without writebacks.
 	c->pixels = memalign(16, sprite_size * max_sprites);
+	assertf(c->pixels, "memory allocation failed");
 
 	// Allocate entries
 	c->entries = calloc(sizeof(SpriteCacheEntry), max_sprites);
+	assertf(c->entries, "memory allocation failed");
 
 	// Compute number of buckets as next-next power of two of the maximum number of
 	// sprites. Notice that a bucket is just 32-bit of memory, so it makes sense
@@ -45,6 +48,7 @@ void sprite_cache_init(SpriteCache *c, int sprite_size, int max_sprites) {
 	c->num_buckets++;
 	c->num_buckets *= 2;
 	c->buckets = malloc(sizeof(SpriteCacheEntry*) * c->num_buckets);
+	assertf(c->buckets, "memory allocation failed");
 
 	sprite_cache_reset(c);
 }
