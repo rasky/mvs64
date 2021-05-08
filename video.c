@@ -92,13 +92,13 @@ void video_render(void) {
 }
 
 void video_palette_w(uint32_t address, uint32_t val, int sz) {
-	if (sz==4) {
+	if (sz == 4) {
 		video_palette_w(address+0, val >> 16, 2);
 		video_palette_w(address+2, val & 0xFFFF, 2);
 		return;
 	}
 
-	assert(sz == 2);
+	if (sz == 1) val |= val << 8;  // FIXME: this is used by unibios in-game menu, verify
 	address &= 0x1FFF;
 	address /= 2;
 	address += PALETTE_RAM_BANK;
@@ -121,6 +121,9 @@ void video_palette_w(uint32_t address, uint32_t val, int sz) {
 }
 
 uint32_t video_palette_r(uint32_t address, int sz) {
+	if (sz==4)
+		return (video_palette_r(address+0, 2) << 16) | video_palette_r(address+2, 2);
+
 	assertf(sz == 2, "video_palette_r access size %d", sz);
 	address &= 0x1FFF;
 	address /= 2;
