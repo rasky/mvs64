@@ -160,7 +160,7 @@ int main(void) {
 
 	emu_add_event(LINE_CLOCK*248, emu_vblank_start, NULL);
 
-	for (int i=0;i<7000;i++) {
+	for (int i=0;i<7000000;i++) {
 		#ifdef N64
 		uint32_t t0 = TICKS_READ();
 		#endif
@@ -168,16 +168,27 @@ int main(void) {
 		if (!plat_poll()) break;
 
 		#ifdef N64
-		uint32_t tlen = TICKS_DISTANCE(t0, TICKS_READ());
+		uint32_t emu_time = TICKS_READ();
 		#else
-		unsigned long tlen = 0;
+		unsigned long emu_time = 0;
 		const int TICKS_PER_SECOND = 60;
 		#endif
-		debugf("[PROFILE] ticks:%ld cpu:%.2f%% PC:%06x\n", tlen, (float)tlen * 100.f / (float)(TICKS_PER_SECOND / 60), m68k_get_reg(NULL, M68K_REG_PC));
 
+		// Draw the screen
 		plat_beginframe();
 		video_render();
 		plat_endframe();
+
+		#ifdef N64
+		uint32_t draw_time = TICKS_READ();
+		#else
+		unsigned long draw_time = 0;
+		#endif
+
+		debugf("[PROFILE] cpu:%.2f%% draw:%.2f%% PC:%06x\n",
+			(float)TICKS_DISTANCE(t0, emu_time) * 100.f / (float)(TICKS_PER_SECOND / 60),
+			(float)TICKS_DISTANCE(emu_time, draw_time) * 100.f / (float)(TICKS_PER_SECOND / 60),
+			m68k_get_reg(NULL, M68K_REG_PC));
 
 		rom_next_frame();
 	}
