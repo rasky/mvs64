@@ -169,9 +169,6 @@ int main(void) {
 
 		#ifdef N64
 		uint32_t emu_time = TICKS_READ();
-		#else
-		unsigned long emu_time = 0;
-		const int TICKS_PER_SECOND = 60;
 		#endif
 
 		// Draw the screen
@@ -181,14 +178,12 @@ int main(void) {
 
 		#ifdef N64
 		uint32_t draw_time = TICKS_READ();
-		#else
-		unsigned long draw_time = 0;
-		#endif
 
 		debugf("[PROFILE] cpu:%.2f%% draw:%.2f%% PC:%06x\n",
 			(float)TICKS_DISTANCE(t0, emu_time) * 100.f / (float)(TICKS_PER_SECOND / 60),
 			(float)TICKS_DISTANCE(emu_time, draw_time) * 100.f / (float)(TICKS_PER_SECOND / 60),
 			m68k_get_reg(NULL, M68K_REG_PC));
+		#endif
 
 		rom_next_frame();
 	}
