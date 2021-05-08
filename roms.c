@@ -14,6 +14,9 @@ uint8_t P_ROM[2*1024*1024] __attribute__((aligned(256*1024)));
 uint8_t P_ROM[2*1024*1024];
 #endif
 
+// Address to trigger idle-skipping
+unsigned int rom_pc_idle_skip = 0;
+
 static SpriteCache srom_cache;
 static SpriteCache crom_cache;
 
@@ -219,6 +222,9 @@ void rom_load_mslug(const char *dir) {
 	srom_fn[1] = "201-s1.n64.bin";
 	crom_fn[0] = "201-c1.n64.bin";
 	crom_set_bank(0);
+
+	// Configure idle skip
+	rom_pc_idle_skip = 0x1FE2;
 
 	#if 0
 	rom(dir, "201-s1.bin", 0, 128*1024, S_ROM, false);

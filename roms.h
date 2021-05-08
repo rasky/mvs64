@@ -2,6 +2,7 @@
 #define ROMS_H
 
 extern uint8_t P_ROM[];
+extern unsigned int rom_pc_idle_skip;
 
 void rom_load_bios(const char *dir);
 void rom_load_mslug(const char *dir);

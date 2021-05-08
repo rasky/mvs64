@@ -2,6 +2,8 @@
 #define M68KINLINE_H
 
 #include <stdint.h>
+#include <stdbool.h>
+#include "roms.h"
 
 #ifndef N64
 
@@ -106,5 +108,9 @@ static inline unsigned int  m68k_read_pcrelative_16(unsigned int address) { retu
 static inline unsigned int  m68k_read_pcrelative_32(unsigned int address) { return *(u_uint32_t*)address; }
 
 #endif
+
+static inline bool m68k_check_idle_skip(unsigned int address) {
+	return address == rom_pc_idle_skip;
+}
 
 #endif

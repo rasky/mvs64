@@ -1482,17 +1482,23 @@ static inline void m68ki_jump_vector(uint vector)
 static inline void m68ki_branch_8(uint offset)
 {
 	REG_PC += MAKE_INT_8(offset);
+	if (m68k_check_idle_skip(REG_PC))
+		m68k_end_timeslice();
 }
 
 static inline void m68ki_branch_16(uint offset)
 {
 	REG_PC += MAKE_INT_16(offset);
+	if (m68k_check_idle_skip(REG_PC))
+		m68k_end_timeslice();
 }
 
 static inline void m68ki_branch_32(uint offset)
 {
 	REG_PC += offset;
 	m68ki_pc_changed(REG_PC);
+	if (m68k_check_idle_skip(REG_PC))
+		m68k_end_timeslice();
 }
 
 /* ---------------------------- Status Register --------------------------- */
