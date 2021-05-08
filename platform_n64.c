@@ -19,7 +19,10 @@ void plat_init(int audiofreq, int fps) {
     debugf("heap [%p - %p = %d]\n", heap_top, heap_end, heap_top-heap_end);
 
 	controller_init();
-	display_init(RESOLUTION_320x240, DEPTH_16_BPP, 2, GAMMA_NONE, ANTIALIAS_OFF);
+    // NOTE: there seems to be a bug in libdragon display library when ANTIALIAS_OFF
+    // is used. Some RDP register is not configured correctly and the display is
+    // corrupted on NTSC consoles.
+	display_init(RESOLUTION_320x240, DEPTH_16_BPP, 2, GAMMA_NONE, ANTIALIAS_RESAMPLE);
     dfs_init(DFS_DEFAULT_LOCATION);
     rdp_init();
 }
