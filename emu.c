@@ -58,9 +58,6 @@ static uint64_t m68k_exec(uint64_t clock) {
 	clock /= M68K_CLOCK_DIV;
 	if (clock > m68k_clock) {
 		m68k_clock += m68k_execute(clock - m68k_clock);	
-		// make sure that m68k_cycles_run returns 0 while cpu is not running,
-		// otherwise emu_clock() is wrong
-		m68k_end_timeslice();
 	}
 	return m68k_clock * M68K_CLOCK_DIV;
 }
