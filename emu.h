@@ -14,13 +14,13 @@
 typedef uint32_t (*EmuEventCb)(void *cbarg);
 
 typedef struct {
-    uint32_t clock;
+    int64_t clock;
     EmuEventCb cb;
     void *cbarg;
 } EmuEvent;
 
-int emu_add_event(uint32_t clock, EmuEventCb cb, void *cbarg);
-void emu_change_event(int event_id, uint32_t clock);
+int emu_add_event(int64_t clock, EmuEventCb cb, void *cbarg);
+void emu_change_event(int event_id, int64_t clock);
 int64_t emu_clock(void);
 int64_t emu_clock_frame(void);
 uint32_t emu_pc(void);

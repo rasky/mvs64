@@ -76,7 +76,7 @@ static EmuEvent* next_event() {
     return e;
 }
 
-int emu_add_event(uint32_t clock, EmuEventCb cb, void *cbarg) {
+int emu_add_event(int64_t clock, EmuEventCb cb, void *cbarg) {
     for (int i=0;i<MAX_EVENTS;i++) {
         if (events[i].cb) continue;
         events[i].clock = clock;
@@ -87,7 +87,7 @@ int emu_add_event(uint32_t clock, EmuEventCb cb, void *cbarg) {
     assert(0);
 }
 
-void emu_change_event(int event_id, uint32_t newclock) {
+void emu_change_event(int event_id, int64_t newclock) {
 	events[event_id].clock = newclock;
 	m68k_end_timeslice();
 }
