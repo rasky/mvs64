@@ -325,6 +325,9 @@ void rom_load_samsho(const char *dir) {
 	srom_fn[1] = "045-s1.n64.bin";
 	crom_fn[0] = "045-c1.n64.bin";
 	crom_set_bank(0);
+
+	// Configure idle skip
+	rom_pc_idle_skip = 0xF7E;
 }
 
 #if 0
