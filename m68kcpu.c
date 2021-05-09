@@ -1081,6 +1081,8 @@ unsigned int m68k_get_virq(unsigned int level)
 
 void m68k_init(void)
 {
+#if 0
+	/* RASKY: ocpode table is now built at compile time */
 	static uint emulation_initialized = 0;
 
 	/* The first call to this function initializes the opcode handler jump table */
@@ -1089,7 +1091,7 @@ void m68k_init(void)
 		m68ki_build_opcode_table();
 		emulation_initialized = 1;
 	}
-
+#endif
 	m68k_set_int_ack_callback(NULL);
 	m68k_set_bkpt_ack_callback(NULL);
 	m68k_set_reset_instr_callback(NULL);
