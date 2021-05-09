@@ -63,6 +63,12 @@ static void write_bankswitch(uint32_t addr, uint32_t val, int sz) {
 }
 
 uint32_t read_hwio(uint32_t addr, int sz)  {
+	if (sz == 4) {
+		// NOTE: order is important
+		uint32_t val = read_hwio(addr+0, 2) << 16;
+		return val | read_hwio(addr+2, 2);
+	}
+
 	// Idle skip for RTC Wait Pulse in BIOS boot
 	if (addr == 0x320001 && m68k_get_reg(NULL, M68K_REG_PC) == 0xC11DA2) {
 		m68k_end_timeslice();
@@ -94,6 +100,12 @@ uint32_t read_hwio(uint32_t addr, int sz)  {
 }
 
 void write_hwio(uint32_t addr, uint32_t val, int sz)  {
+	if (sz == 4) {
+		write_hwio(addr+0, val>>16, 2);
+		write_hwio(addr+2, val&0xFFFF, 2);
+		return;
+	}
+
 	// if (addr != 0x3C0002 && addr != 0x3C0000)
 	// if (sz == 1) val &= 0xFF;
 	// if (sz == 2) val &= 0xFFFF;
@@ -121,7 +133,7 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 		case 0x1B: assert(sz==1); srom_set_bank(1); return;
 
 	} else if ((addr>>16) == 0x3C) switch (addr&0xFFFF) {
-		case 0x00: lspc_vram_addr_w(val, sz); return;
+		case 0x00: assert(sz==2); lspc_vram_addr_w(val); return;
 		case 0x02: assert(sz==2); lspc_vram_data_w(val); return;
 		case 0x04: assert(sz==2); lspc_vram_modulo_w(val); return;
 		case 0x06: assert(sz==2); lspc_mode_w(val); return;
@@ -143,6 +155,7 @@ unsigned int  m68k_read_memory_8(unsigned int address) {
 }
 
 unsigned int  m68k_read_memory_16(unsigned int address) {
+	assertf(!(address&1), "unaligned rm16: %x\n", address);
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->r) return b->r(address, 2);
 	if (b->mem) return BE16(*(u_uint16_t*)(b->mem + (address & b->mask)));
@@ -151,6 +164,7 @@ unsigned int  m68k_read_memory_16(unsigned int address) {
 }
 
 unsigned int  m68k_read_memory_32(unsigned int address) {
+	assertf(!(address&1), "unaligned rm32: %x\n", address);
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->r) return b->r(address, 4);
 	if (b->mem) return BE32(*(u_uint32_t*)(b->mem + (address & b->mask)));
@@ -166,6 +180,7 @@ void m68k_write_memory_8(unsigned int address, unsigned int value) {
 }
 
 void m68k_write_memory_16(unsigned int address, unsigned int value) {
+	assertf(!(address&1), "unaligned wm16: %x\n", address);
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->w) { b->w(address, value, 2); return; }
 	if (b->mem) { *(u_uint16_t*)(b->mem + (address & b->mask)) = BE16(value); return; }
@@ -173,6 +188,7 @@ void m68k_write_memory_16(unsigned int address, unsigned int value) {
 }
 
 void m68k_write_memory_32(unsigned int address, unsigned int value) {
+	assertf(!(address&1), "unaligned wm32: %x\n", address);
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->w) { b->w(address, value, 4); return; }
 	if (b->mem) { *(u_uint32_t*)(b->mem + (address & b->mask)) = BE32(value); return; }

@@ -17,13 +17,7 @@ static uint16_t lspc_vram_data_r(void) {
 	return VIDEO_RAM[reg_vramaddr];
 }
 
-static void lspc_vram_addr_w(uint32_t val, int sz) {
-	if (sz == 4) {
-		lspc_vram_addr_w(val >> 16, 2);
-		lspc_vram_data_w(val);
-		return;
-	}
-	assert(sz == 2);
+static void lspc_vram_addr_w(uint32_t val) {
 	reg_vramaddr = val;
 	// debugf("[HWIO] vram addr=%04x (PC:%06x)\n", reg_vramaddr, (unsigned int)emu_pc());
 }
