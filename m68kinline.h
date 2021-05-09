@@ -45,66 +45,58 @@ static inline unsigned int  m68k_read_pcrelative_32(unsigned int address) {
 
 // M68K memory handlers on N64 host.
 //
-// In general, m68k can do unaligned memory accesses, so we need to force GCC
-// to generate code for accessing unaligned memory. This is done through the
-// u_uint16_t / u_uint32_t typedefs, which for instance force GCC to generate
-// LWL/LWR to do a 32-bit memory load.
+// In general, m68k can only do 16-bit aligned memory accesses. 32-bit memory
+// accesses are done through two subsequent 16-bit accesses, which means that
+// in general 32-bit accesses are not 32-bit aligned (they're only 16-bit aligned).
 //
-// For HWIO registers, memory accesses will cause a TLB fault that will be
-// handled by hw_n64.S to dispatch to the appropriate functions in hw.c.
-// To simplify the job of the TLB exception handlers, we need HWIO memory accesses
-// to happen with a single memory opcode (eg: LW), and this is indeed possible
-// as memory mapped registers are hopefully always aligned. So, in general,
-// all memory handlers will check whether the address is aligned or not, and
-// generate the correct code for the two cases.
+// This means that we on N64 we can use a direct memory access for both 8-bit
+// and 16-bit handlers, but for 32-bits we need to use unaligned accesses
+// through the u_uint32_t datatype which generates LWL/LWR/SWL/SWR sequences.
+//
+// This also works for HWIO registers, where memory accesses will cause a TLB
+// fault that will be handled by hw_n64.S to dispatch to the appropriate functions
+// in hw.c. hw_n64.S will not have any trouble with 8-bit and 16-bit, and can
+// also handle LWL/LWR by simply emulating the real access on LWL, and then
+// treating LWR as a nop.
+//
+// We mark all accesses as volatile because we need the CPU core to actually
+// make them the way they're defined without outsmarting us. This is important
+// for HWIO accesses where the actual bus access size and order might matter.
 
 // Typedefs for unaligned memory accesses
-typedef uint16_t u_uint16_t __attribute__((aligned(1)));
 typedef uint32_t u_uint32_t __attribute__((aligned(1)));
 
 static inline unsigned int  m68k_read_memory_8(unsigned int address) {
-	return *(uint8_t*)address;
+	return *(volatile uint8_t*)address;
 }
 static inline unsigned int  m68k_read_memory_16(unsigned int address) {
-	if (address & 1)
-		return *(u_uint16_t*)address;
-	else
-		return *(volatile uint16_t*)address;
+	return *(volatile uint16_t*)address;
 }
 static inline unsigned int  m68k_read_memory_32(unsigned int address) {
-	if (address & 3)
-		return *(u_uint32_t*)address;
-	else
-		return *(volatile uint32_t*)address;
+	return *(volatile u_uint32_t*)address;
 }
 
 static inline void m68k_write_memory_8(unsigned int address, unsigned int val) {
-	*(uint8_t*)address = val;
+	*(volatile uint8_t*)address = val;
 }
 static inline void m68k_write_memory_16(unsigned int address, unsigned int val) { 
-	if (address & 1)
-		*(u_uint16_t*)address = val; 
-	else
-		*(uint16_t*)address = val;	
+	*(volatile uint16_t*)address = val;	
 }
 static inline void m68k_write_memory_32(unsigned int address, unsigned int val) { 
-	if (address & 3)
-		*(u_uint32_t*)address = val;
-	else
-		*(uint32_t*)address = val;	
+	*(volatile u_uint32_t*)address = val;
 }
 
 // The following handlers are used to fetch opcodes from memory (activated by
-// M68K_SEPARATE_READS in m68kconf.h). Since m68k always runs code from ROM/RAM
-// (not from HWIO registers), we can use direct (unaligned) memory accesses without
-// having to have a separate code-path for aligned addresses like we do for the
-// other handlers.
+// M68K_SEPARATE_READS in m68kconf.h). Currently we don't need to special
+// case these on N64. The only different is that we don't mark them as volatile
+// since they're accessing raw memory (RAM/ROM) and thus the compiler can fuse
+// them if it wishes so (I think it won't happen, but anyway).
 
-static inline unsigned int  m68k_read_immediate_16(unsigned int address) { return *(u_uint16_t*)address; }
+static inline unsigned int  m68k_read_immediate_16(unsigned int address) { return *(uint16_t*)address; }
 static inline unsigned int  m68k_read_immediate_32(unsigned int address) { return *(u_uint32_t*)address; }
 
 static inline unsigned int  m68k_read_pcrelative_8(unsigned int address) { return *(uint8_t*)address; }
-static inline unsigned int  m68k_read_pcrelative_16(unsigned int address) { return *(u_uint16_t*)address; }
+static inline unsigned int  m68k_read_pcrelative_16(unsigned int address) { return *(uint16_t*)address; }
 static inline unsigned int  m68k_read_pcrelative_32(unsigned int address) { return *(u_uint32_t*)address; }
 
 #endif
