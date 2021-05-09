@@ -29,7 +29,8 @@ static void render_fix(void) {
 		fix += 2; // skip two lines
 		for (int j=0;j<28;j++) {
 			uint16_t v = *fix++;
-			draw_sprite_fix(v & 0xFFF, (v >> 12) & 0xF, i*8, j*8);
+			if (v)
+				draw_sprite_fix(v & 0xFFF, (v >> 12) & 0xF, i*8, j*8);
 		}
 		fix += 2;
 	}
