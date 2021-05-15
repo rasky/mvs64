@@ -364,22 +364,22 @@ typedef uint32 uint64;
 #define CPU_STOPPED      m68ki_cpu.stopped
 #define CPU_PREF_ADDR    m68ki_cpu.pref_addr
 #define CPU_PREF_DATA    m68ki_cpu.pref_data
-#define CPU_ADDRESS_MASK m68ki_cpu.address_mask
+#define CPU_ADDRESS_MASK 0xffffff //m68ki_cpu.address_mask
 #define CPU_SR_MASK      m68ki_cpu.sr_mask
 #define CPU_INSTR_MODE   m68ki_cpu.instr_mode
 #define CPU_RUN_MODE     m68ki_cpu.run_mode
 
 #define CYC_INSTRUCTION  m68ki_cpu.cyc_instruction
 #define CYC_EXCEPTION    m68ki_cpu.cyc_exception
-#define CYC_BCC_NOTAKE_B m68ki_cpu.cyc_bcc_notake_b
-#define CYC_BCC_NOTAKE_W m68ki_cpu.cyc_bcc_notake_w
-#define CYC_DBCC_F_NOEXP m68ki_cpu.cyc_dbcc_f_noexp
-#define CYC_DBCC_F_EXP   m68ki_cpu.cyc_dbcc_f_exp
-#define CYC_SCC_R_TRUE   m68ki_cpu.cyc_scc_r_true
-#define CYC_MOVEM_W      m68ki_cpu.cyc_movem_w
-#define CYC_MOVEM_L      m68ki_cpu.cyc_movem_l
-#define CYC_SHIFT        m68ki_cpu.cyc_shift
-#define CYC_RESET        m68ki_cpu.cyc_reset
+#define CYC_BCC_NOTAKE_B -2 //m68ki_cpu.cyc_bcc_notake_b
+#define CYC_BCC_NOTAKE_W 2 //m68ki_cpu.cyc_bcc_notake_w
+#define CYC_DBCC_F_NOEXP -2 //m68ki_cpu.cyc_dbcc_f_noexp
+#define CYC_DBCC_F_EXP   2 //m68ki_cpu.cyc_dbcc_f_exp
+#define CYC_SCC_R_TRUE   2 //m68ki_cpu.cyc_scc_r_true
+#define CYC_MOVEM_W      2 //m68ki_cpu.cyc_movem_w
+#define CYC_MOVEM_L      3 //m68ki_cpu.cyc_movem_l
+#define CYC_SHIFT        1 //m68ki_cpu.cyc_shift
+#define CYC_RESET        132 //m68ki_cpu.cyc_reset
 #define HAS_PMMU	 m68ki_cpu.has_pmmu
 #define PMMU_ENABLED	 m68ki_cpu.pmmu_enabled
 #define RESET_CYCLES	 m68ki_cpu.reset_cycles
