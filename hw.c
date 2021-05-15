@@ -218,18 +218,8 @@ unsigned int m68k_read_disassembler_32(unsigned int address) {
 	return 0xFFFFFFFF;
 }
 
-#ifndef N64
 
-uint8_t *pc_fastptr_bank;
-
-static void pc_fastptr_refresh(unsigned int address) {
-	Bank *b = &banks[(address>>20)&0xF];
-	assert(b->mem);
-	pc_fastptr_bank = b->mem;
-	// debugf("[HW] fastptr refresh: %x\n", address);
-}
-
-#else
+#ifdef N64
 
 #define C0_INDEX() ({ \
     uint32_t x; \
@@ -380,10 +370,6 @@ void hw_init(void) {
 	#endif
 
 	rtc_init();
-
-	#ifndef N64
-	m68k_set_pc_changed_callback(pc_fastptr_refresh);
-	#endif
 }
 
 void hw_vblank(void) {

@@ -5,43 +5,7 @@
 #include <stdbool.h>
 #include "roms.h"
 
-#ifndef N64
-
-extern uint8_t *pc_fastptr_bank;
-
 #ifdef N64
-	#define BE16(x)  (x)
-	#define BE32(x)  (x)
-#else
-	#define BE16(x)  __builtin_bswap16(x)
-	#define BE32(x)  __builtin_bswap32(x)
-#endif
-
-static inline unsigned int  m68k_read_immediate_16(unsigned int address) {
-	typedef uint16_t u_uint16_t __attribute__((aligned(1)));
-	return BE16(*(u_uint16_t*)(pc_fastptr_bank + (address&0xFFFFF)));
-}
-
-static inline unsigned int  m68k_read_immediate_32(unsigned int address) {
-	typedef uint32_t u_uint32_t __attribute__((aligned(1)));
-	return BE32(*(u_uint32_t*)(pc_fastptr_bank + (address&0xFFFFF)));
-}
-
-static inline unsigned int  m68k_read_pcrelative_8(unsigned int address) { 
-	return *(pc_fastptr_bank + (address&0xFFFFF));
-}
-
-static inline unsigned int  m68k_read_pcrelative_16(unsigned int address) { 
-	typedef uint16_t u_uint16_t __attribute__((aligned(1)));
-	return BE16(*(u_uint16_t*)(pc_fastptr_bank + (address&0xFFFFF)));
-}
-
-static inline unsigned int  m68k_read_pcrelative_32(unsigned int address) { 
-	typedef uint32_t u_uint32_t __attribute__((aligned(1)));
-	return BE32(*(u_uint32_t*)(pc_fastptr_bank + (address&0xFFFFF)));
-}
-
-#else
 
 // M68K memory handlers on N64 host.
 //
@@ -85,19 +49,6 @@ static inline void m68k_write_memory_16(unsigned int address, unsigned int val) 
 static inline void m68k_write_memory_32(unsigned int address, unsigned int val) { 
 	*(volatile u_uint32_t*)address = val;
 }
-
-// The following handlers are used to fetch opcodes from memory (activated by
-// M68K_SEPARATE_READS in m68kconf.h). Currently we don't need to special
-// case these on N64. The only different is that we don't mark them as volatile
-// since they're accessing raw memory (RAM/ROM) and thus the compiler can fuse
-// them if it wishes so (I think it won't happen, but anyway).
-
-static inline unsigned int  m68k_read_immediate_16(unsigned int address) { return *(uint16_t*)address; }
-static inline unsigned int  m68k_read_immediate_32(unsigned int address) { return *(u_uint32_t*)address; }
-
-static inline unsigned int  m68k_read_pcrelative_8(unsigned int address) { return *(uint8_t*)address; }
-static inline unsigned int  m68k_read_pcrelative_16(unsigned int address) { return *(uint16_t*)address; }
-static inline unsigned int  m68k_read_pcrelative_32(unsigned int address) { return *(u_uint32_t*)address; }
 
 #endif
 
