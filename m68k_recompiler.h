@@ -41,12 +41,6 @@
 
 #undef REG_IR
 
-#undef FLAG_X
-#undef FLAG_N
-#undef FLAG_Z
-#undef FLAG_V
-#undef FLAG_C
-
 #undef OPER_I_8
 #undef OPER_I_16
 #undef OPER_I_32
@@ -71,7 +65,7 @@
 #undef EA_PCIX_16
 #undef EA_PCIX_32
 
-#define OPER_I_16()    ({ OPARGIDX+=2; unsigned int x = OPARG[OPARGIDX-2] << 8; x |= OPARG[OPARGIDX-1]; REG_PC += 2; x; })
+#define OPER_I_16()    ({ REG_PC += 2; OPARG[OPARGIDX++]; })
 #define OPER_I_8()     ({ OPER_I_16() & 0xFF; })
 #define OPER_I_32()    ({ unsigned int x = OPER_I_16() << 16; x |= OPER_I_16(); x; })
 #define EA_AY_DI_8()   (AY+MAKE_INT_16(OPER_I_16()))

@@ -295,7 +295,6 @@ int main(int argc, char *argv[]) {
 		fprintf(out, "#pragma GCC diagnostic ignored \"-Wunused-variable\"\n");
 		fprintf(out, "\n");
 		fprintf(out, "uint32_t func_%08X(m68ki_cpu_core * restrict __m68ki_cpu, int * restrict __m68ki_remaining_cycles, uint32_t __pc) {\n", pc);
-		fprintf(out, "\tuint FLAG_N = m68ki_cpu.n_flag, FLAG_X = m68ki_cpu.x_flag, FLAG_C = m68ki_cpu.c_flag, FLAG_V = m68ki_cpu.v_flag, FLAG_Z = m68ki_cpu.not_z_flag;\n");
 		fprintf(out, "\n");
 
 		int opcount = 0;
@@ -319,8 +318,9 @@ int main(int argc, char *argv[]) {
 			fprintf(out, "\t\tUSE_CYCLES(%d);\n", oph->cycles[0]);
 			fprintf(out, "\t\tuint REG_IR = 0x%x;\n", be16(func));
 			if (oplen > 2) {		
+				if (oplen & 1) panic("invalid odd opcode length: %d @ PC:%x", oplen, pc);
 				fprintf(out, "\t\tuint OPARG[] = { ");
-				for (int i=2;i<oplen;i++) fprintf(out, "0x%02x%c", func[i], i==oplen-1 ? ' ' : ',');
+				for (int i=2;i<oplen;i+=2) fprintf(out, "0x%04x%s", be16(&func[i]), i==oplen-2 ? " " : ", ");
 				fprintf(out, "}; uint OPARGIDX=0;\n");
 			}
 
@@ -423,8 +423,8 @@ int main(int argc, char *argv[]) {
 		}
 
 		fprintf(out, "\n\texit:\n");
-		fprintf(out, "\tm68ki_cpu.n_flag = FLAG_N; m68ki_cpu.v_flag = FLAG_V; m68ki_cpu.x_flag = FLAG_X; m68ki_cpu.c_flag = FLAG_C; m68ki_cpu.not_z_flag = FLAG_Z;\n");
-		fprintf(out, "\tm68ki_cpu.pc = REG_PC;\n");
+		// fprintf(out, "\tm68ki_cpu.n_flag = FLAG_N; m68ki_cpu.v_flag = FLAG_V; m68ki_cpu.x_flag = FLAG_X; m68ki_cpu.c_flag = FLAG_C; m68ki_cpu.not_z_flag = FLAG_Z;\n");
+		// fprintf(out, "\tm68ki_cpu.pc = REG_PC;\n");
 		fprintf(out, "\treturn REG_PC;\n");
 		fprintf(out, "}\n");
 		fclose(out);
