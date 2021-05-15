@@ -1,0 +1,26 @@
+BUILD_DIR = build/genhle
+
+include n64rasky.mk
+
+genhle_src = genhle.c m68kdasm.c
+genhle_obj = $(genhle_src:%.c=$(BUILD_DIR)/%.o)
+
+CFLAGS += -O2 -Wall -Werror
+
+ifeq ($(D),1)
+CFLAGS += -fsanitize=address -fsanitize=undefined -g
+LDFLAGS += -fsanitize=address -fsanitize=undefined -g
+endif
+
+all: genhle
+
+genhle: $(genhle_obj)
+	@echo "    [LD] $@"
+	$(CC) $(LDFLAGS) -o $@ $^
+
+clean:
+	@rm -f $(genhle_obj)
+
+-include $(genhle_src:%.c=$(BUILD_DIR)/%.d)
+
+.PHONY: all

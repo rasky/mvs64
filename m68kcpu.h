@@ -922,7 +922,7 @@ typedef union
 	double f;
 } fp_reg;
 
-typedef struct
+typedef struct m68ki_cpu_core_s
 {
 	uint cpu_type;     /* CPU Type: 68000, 68008, 68010, 68EC020, 68020, 68EC030, 68030, 68EC040, or 68040 */
 	uint dar[16];      /* Data and Address Registers */
@@ -1002,9 +1002,11 @@ typedef struct
 
 } m68ki_cpu_core;
 
-
+#ifndef M68K_RECOMPILER
 extern m68ki_cpu_core m68ki_cpu;
 extern sint           m68ki_remaining_cycles;
+#endif
+
 extern uint           m68ki_tracing;
 extern const uint8    m68ki_shift_8_table[];
 extern const uint16   m68ki_shift_16_table[];
@@ -1026,6 +1028,12 @@ static inline void m68ki_check_interrupts(void);            /* ASG: check for in
 /* quick disassembly (used for logging) */
 char* m68ki_disassemble_quick(unsigned int pc, unsigned int cpu_type);
 
+
+// RASKY: When using the recompiler, all utility functions are dangerous because
+// they access the global state directly (recompiler uses restricted pointers
+// for performance). So we compile them out, and we will reimplement them as
+// needed in m68k_recompiler.h
+#ifndef M68K_RECOMPILER  
 
 /* ======================================================================== */
 /* =========================== UTILITY FUNCTIONS ========================== */
@@ -1115,6 +1123,7 @@ static inline uint m68ki_read_imm_32(void)
 	return m68k_read_immediate_32(ADDRESS_68K(REG_PC-4));
 #endif /* M68K_EMULATE_PREFETCH */
 }
+#endif /* M68K_RECOMPILER */
 
 /* ------------------------- Top level read/write ------------------------- */
 
@@ -1218,6 +1227,7 @@ static inline void m68ki_write_32_pd_fc(uint address, uint fc, uint value)
 }
 #endif
 
+#ifndef M68K_RECOMPILER
 /* --------------------- Effective Address Calculation -------------------- */
 
 /* The program counter relative addressing modes cause operands to be
@@ -1399,7 +1409,6 @@ static inline uint OPER_PCDI_32(void)  {uint ea = EA_PCDI_32();  return m68ki_re
 static inline uint OPER_PCIX_8(void)   {uint ea = EA_PCIX_8();   return m68ki_read_pcrel_8(ea); }
 static inline uint OPER_PCIX_16(void)  {uint ea = EA_PCIX_16();  return m68ki_read_pcrel_16(ea);}
 static inline uint OPER_PCIX_32(void)  {uint ea = EA_PCIX_32();  return m68ki_read_pcrel_32(ea);}
-
 
 
 /* ---------------------------- Stack Functions --------------------------- */
@@ -2142,7 +2151,7 @@ static inline void m68ki_check_interrupts(void)
 		m68ki_exception_interrupt(CPU_INT_LEVEL>>8);
 }
 
-
+#endif /* M68K_RECOMPILER */
 
 /* ======================================================================== */
 /* ============================== END OF FILE ============================= */
