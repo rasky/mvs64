@@ -225,7 +225,7 @@ tlb_readhwio_writedest:
 	j tlb_readhwio_end
 	move $30, v0
 	j tlb_readhwio_end
-	move $31, v0
+	sd v0, 21*8(sp)
 
 tlb_readhwio_end:
 	# OK we're done. Exit
@@ -313,7 +313,7 @@ tlb_writehwio_fetchsrc:
 	j tlb_writehwio_do
 	move a1, $30
 	j tlb_writehwio_do
-	move a1, $31
+	ld a1, 21*8(sp)
 
 tlb_writehwio_do:
 	# Call the memory handler. write_hwio for HWIO, and video_palette_w for
