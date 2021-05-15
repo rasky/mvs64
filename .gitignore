@@ -1,2 +1,7 @@
 roms
 build
+libdragon
+*.bin
+*.dfs
+*.elf
+*.z64
