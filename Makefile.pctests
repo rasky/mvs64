@@ -22,7 +22,7 @@ emu: $(emu_obj)
 	$(CC) $(LDFLAGS) -o $@ $^
 
 clean:
-	@rm -f $(emu_obj)
+	@rm -f $(emu_obj) $(emu_src:%.c=$(BUILD_DIR)/%.d)
 
 -include $(emu_src:%.c=$(BUILD_DIR)/%.d)
 

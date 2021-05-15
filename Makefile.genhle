@@ -19,7 +19,7 @@ genhle: $(genhle_obj)
 	$(CC) $(LDFLAGS) -o $@ $^
 
 clean:
-	@rm -f $(genhle_obj)
+	@rm -f $(genhle_obj) $(genhle_src:%.c=$(BUILD_DIR)/%.d)
 
 -include $(genhle_src:%.c=$(BUILD_DIR)/%.d)
 
