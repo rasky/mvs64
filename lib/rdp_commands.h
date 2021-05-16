@@ -61,9 +61,9 @@
     RdpTextureRectangle1FX(tidx, (int32_t)((x0)*4.f), (int32_t)((y0)*4.f), (int32_t)((x1)*4.f), (int32_t)((y1)*4.f))
 
 #define RdpTextureRectangle2FX(s,t,ds,dt) \
-    ((cast64((s))<<48) | (cast64((t))<<32) | ((ds)<<16) | ((dt)<<0))
+    ((cast64((s)&0xFFFF)<<48) | (cast64((t)&0xFFFF)<<32) | (cast64((ds)&0xFFFF)<<16) | (cast64((dt)&0xFFFF)<<0))
 #define RdpTextureRectangle2I(s,t,ds,dt) \
-    RdpTextureRectangle2FX((s)<<5, (t)<<5, cast64((ds)&0x3F)<<10, cast64((dt)&0x3F)<<10)
+    RdpTextureRectangle2FX((s)<<5, (t)<<5, (ds)<<10, (dt)<<10)
 #define RdpTextureRectangle2F(s,t,ds,dt) \
     RdpTextureRectangle2FX((int32_t)((s)*32.f), (int32_t)((t)*32.f), (int32_t)((ds)*1024.f), (int32_t)((dt)*1024.f))
 
