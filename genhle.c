@@ -167,12 +167,12 @@ bool decode_duffdevice(unsigned char *rom, unsigned int pc, int *ddlen, int *dds
 //
 // where k2+1 is a power of two constants. It can be used to construct a hash
 // table of k2+1 elements where the numbers hash perfectly (with no conflicts).
-bool find_perfect_hash(uint32_t *nums, uint32_t* ph_mul, uint32_t* ph_shift, uint32_t* ph_mask) {
+bool find_perfect_hash(uint32_t *nums, int sz, uint32_t* ph_mul, uint32_t* ph_shift, uint32_t* ph_mask) {
 	// List of 250 equidistant twin primes (upper twin)
 	static const uint32_t primes[] = { 3373, 31771, 68713, 106783, 149251, 191671, 237973, 285643, 331693, 385741, 434563, 490249, 541531, 594571, 647839, 703231, 761863, 819619, 875299, 929743, 988111, 1043113, 1099411, 1156849, 1216339, 1273423, 1335619, 1390969, 1454443, 1512829, 1572871, 1631659, 1694353, 1752943, 1815223, 1876453, 1938451, 2002969, 2063731, 2130241, 2194021, 2257441, 2324353, 2387953, 2457349, 2525671, 2591683, 2656321, 2721319, 2788831, 2855431, 2927809, 2992333, 3062881, 3126379, 3193189, 3258163, 3324613, 3394381, 3459751, 3530731, 3598591, 3662761, 3727753, 3798631, 3865009, 3933493, 4006309, 4070821, 4141723, 4211113, 4282471, 4356883, 4425853, 4495993, 4572511, 4643623, 4712683, 4786753, 4860043, 4930381, 5005129, 5082193, 5156551, 5231311, 5304853, 5378701, 5449291, 5518819, 5591743, 5665351, 5741611, 5813443, 5886889, 5957971, 6028513, 6104851, 6174811, 6246439, 6321409, 6399709, 6475831, 6549619, 6625573, 6705619, 6782443, 6860239, 6932911, 7006189, 7082809, 7158691, 7233049, 7308439, 7384549, 7458613, 7533271, 7604671, 7681363, 7752751, 7823833, 7900759, 7976359, 8053219, 8132221, 8206969, 8281459, 8361139, 8436601, 8511649, 8583139, 8656033, 8734513, 8813503, 8891419, 8966359, 9045979, 9125323, 9203101, 9282211, 9356521, 9437191, 9515269, 9591541, 9667501, 9742393, 9814993, 9900601, 9981373, 10058683, 10135201, 10213453, 10288381, 10370281, 10448239, 10529413, 10612831, 10688221, 10765621, 10847731, 10924339, 11011501, 11090293, 11167909, 11247781, 11331871, 11412859, 11493151, 11570443, 11653363, 11731693, 11815159, 11900419, 11976829, 12057841, 12138523, 12219061, 12294643, 12380569, 12458101, 12543679, 12627259, 12710569, 12788119, 12870103, 12958243, 13037749, 13123681, 13205329, 13290463, 13369273, 13446991, 13530661, 13609483, 13693819, 13779013, 13858303, 13940023, 14022733, 14100661, 14182411, 14261089, 14338609, 14421349, 14512111, 14592493, 14677501, 14760763, 14844001, 14929489, 15005701, 15084061, 15169339, 15253501, 15334093, 15414571, 15497203, 15575743, 15657841, 15739819, 15824443, 15906853, 15990901, 16079881, 16162963, 16249423, 16335901, 16417411, 16496509, 16581199, 16659343, 16744801, 16830973, 16915891, 16996561, 17079529, 17166199, 17246083, 17329261, 17419153, 17501371, 17581429, 17672023, 17751361, 17828731, 17914573, 17996611, 18086041, 18173803, 18260071, 18343081 };
 	const int NUM_PRIMES = sizeof(primes)/sizeof(primes[0]);
 
-	*ph_mask = arrlen(nums);
+	*ph_mask = sz;
 	*ph_mask |= *ph_mask >> 1;
 	*ph_mask |= *ph_mask >> 2;
 	*ph_mask |= *ph_mask >> 4;
@@ -191,12 +191,12 @@ bool find_perfect_hash(uint32_t *nums, uint32_t* ph_mul, uint32_t* ph_shift, uin
 				int j;
 				// Try the hash function and see if there are conflicts
 				memset(slot_used, 0, nslots*sizeof(bool));
-				for (j=0;j<arrlen(nums);j++) {
+				for (j=0;j<sz;j++) {
 					uint32_t idx = ((nums[j] * *ph_mul) >> *ph_shift) & *ph_mask;
 					if (slot_used[idx]) break;
 					slot_used[idx] = true;
 				}
-				if (j == arrlen(nums)) {
+				if (j == sz) {
 					// No conflicts, we found our function
 					return true;
 				}
@@ -257,7 +257,13 @@ int main(int argc, char *argv[]) {
 	fclose(f);
 
 	uint8_t *PROM = NULL; unsigned int PROM_BASE = 0;
-	uint32_t *func_pcs = NULL;
+
+	// Hashtable that maps a PC entrypoint to recompiled function start. Normally,
+	// a function has a single entrypoint (at its beginning) so most entries
+	// will have key==value, but for functions with multiple entrypoints (those
+	// that contains subroutine calls, where we can resume execution), there
+	// will be more entries pointing to the same function.
+	struct { uint32_t key; uint32_t value; } *func_pcs = NULL;
 
 	for (int fx=1;fx<argc;fx++) {
 		if (strchr(argv[fx], '.')) {
@@ -275,12 +281,12 @@ int main(int argc, char *argv[]) {
 			continue;
 		}
 
-		unsigned int pc = strtoul(argv[fx], NULL, 16);
-		if (pc == 0) {
+		unsigned int initial_pc = strtoul(argv[fx], NULL, 16);
+		if (initial_pc == 0) {
 			printf("Invalid argument: %s (ignoring)\n", argv[fx]);
 			continue;
 		}
-		arrput(func_pcs, pc);
+		unsigned int pc = initial_pc;
 
 		char outfn[32] = "hle_"; strcat(outfn, argv[fx]); strcat(outfn, ".c");
 		FILE *out = fopen(outfn, "w"); if (!out) panic("Cannot create: %s\n", outfn);
@@ -290,12 +296,19 @@ int main(int argc, char *argv[]) {
 		const uint8_t *func = PROM + pc - PROM_BASE;
 		struct { unsigned int key; bool value; } *forward_jumps = NULL;
 
+		// List of entrypoints within this function (besides the initial one)
+		uint32_t *entrypoints = NULL;
+
+		// Record the initial entrypoint at the start of the function in the
+		// global map.
+		hmput(func_pcs, pc, pc);
+
 		fprintf(out, "#include \"m68k_recompiler.h\"\n");
 		fprintf(out, "#pragma GCC diagnostic ignored \"-Wunused-label\"\n");
 		fprintf(out, "#pragma GCC diagnostic ignored \"-Wunused-variable\"\n");
 		fprintf(out, "\n");
-		fprintf(out, "uint32_t func_%08X(m68ki_cpu_core * restrict __m68ki_cpu, int * restrict __m68ki_remaining_cycles, uint32_t __pc) {\n", pc);
-		fprintf(out, "\n");
+		fprintf(out, "uint32_t func_%08X(m68ki_cpu_core * restrict __m68ki_cpu, int * restrict __m68ki_remaining_cycles, uint32_t __entry_pc) {\n", pc);
+		fprintf(out, "\tif (__builtin_expect(__entry_pc != 0x%x, 0)) goto find_entrypoint;\n\n", pc);
 
 		int opcount = 0;
 		while (1) {
@@ -328,6 +341,7 @@ int main(int argc, char *argv[]) {
 			static const char *branches_off_8[] =  { "m68k_op_beq_8",  "m68k_op_bne_8",  "m68k_op_blt_8",  "m68k_op_bgt_8",  "m68k_op_bcc_8",  "m68k_op_dbf_8",  "m68k_op_bra_8",  NULL };
 			static const char *branches_off_16[] = { "m68k_op_beq_16", "m68k_op_bne_16", "m68k_op_blt_16", "m68k_op_bgt_16", "m68k_op_bcc_16", "m68k_op_dbf_16", "m68k_op_bra_16", NULL };
 			static const char *jump_tables[] = { "m68k_op_jmp_32_pc", NULL };
+			static const char *calls[] = { "m68k_op_bsr_8", "m68k_op_bsr_16", NULL };
 
 			char goto_next[24]; unsigned int target=0;
 			if (stranyprefix(oph->opcode_handler, branches_off_16)) {
@@ -383,28 +397,35 @@ int main(int argc, char *argv[]) {
 		
 			fprintf(out, "%s", body);
 
-			// If the opcode body still contains a "return", it's a bug because we
-			// need to handle it before to convert it to an appropriate goto.
-			if (strstr(body, "return;")) {
-				panic("unhandled return in body -- recompiler bug\n");
-			}
-
-			// If the opcode body still contains a branch, it's a bug because we
-			// need to handle all branches one way or another as goto.
-			// FIXME: we might want to change this to treat all residual branches
-			// as jumps, and simply exit the HLE function.
-			if (strstr(body, "m68ki_branch_")) {
-				panic("unhandled branch in body -- recompiler bug\n");	
-			}
-
-			// If the function contains a jump, it's probably a jump somewhere
-			// outside the current function, so the best course of action is
-			// exit the HLE function and fallback to the standard interpreter.
+			// If the function contains a jump or it's a subroutine call, it's
+			// probably a jump somewhere outside the current function, so the
+			// best course of action is exit the HLE function and fallback to
+			// the standard interpreter.
 			// For specific cases like direct branches or duff devices, the code
 			// above as already tried to decode the target inline to speed it up,
 			// but we keep this as a final fallback in case anything fails.
 			if (strstr(body, "m68ki_jump")) {
 				fprintf(out, "\t\tgoto exit;\n");
+
+			} else if (stranyprefix(oph->opcode_handler, calls)) {
+				fprintf(out, "\t\tgoto exit;\n");
+				// The opcode after the subroutine call is a possible re-entrypoint
+				// of the function.
+				arrput(entrypoints, pc+oplen);
+				hmput(func_pcs, pc+oplen, initial_pc);
+
+			// If the opcode body still contains a branch, it's a bug because we
+			// need to handle all branches one way or another as goto.
+			// FIXME: we might want to change this to treat all residual branches
+			// as jumps, and simply exit the HLE function.
+			} else if (strstr(body, "m68ki_branch_")) {
+				panic("unhandled branch in body -- recompiler bug\n");	
+			}
+
+			// If the opcode body still contains a "return", it's a bug because we
+			// need to handle it before to convert it to an appropriate goto.
+			if (strstr(body, "return;")) {
+				panic("unhandled return in body -- recompiler bug\n");
 			}
 
 			fprintf(out, "\t}\n");
@@ -423,22 +444,29 @@ int main(int argc, char *argv[]) {
 		}
 
 		fprintf(out, "\n\texit:\n");
-		// fprintf(out, "\tm68ki_cpu.n_flag = FLAG_N; m68ki_cpu.v_flag = FLAG_V; m68ki_cpu.x_flag = FLAG_X; m68ki_cpu.c_flag = FLAG_C; m68ki_cpu.not_z_flag = FLAG_Z;\n");
-		// fprintf(out, "\tm68ki_cpu.pc = REG_PC;\n");
 		fprintf(out, "\treturn REG_PC;\n");
+		fprintf(out, "\n\tfind_entrypoint:\n");
+		for (int i=0;i<arrlen(entrypoints);i++)
+			fprintf(out, "\tif (__entry_pc == 0x%x) goto op_%08X;\n", entrypoints[i], entrypoints[i]);
+		fprintf(out, "\tassert(!\"recompiler bug: invalid entrypoint\");\n");
 		fprintf(out, "}\n");
 		fclose(out);
 
 		if (hmlen(forward_jumps) > 0) panic("forward jump not satisfied: %x", forward_jumps[0].key);
 		hmfree(forward_jumps);
+		arrfree(entrypoints);
 	}
 
+	// Copy all keys of the global entrypoint map into an array.
+	uint32_t all_pcs[hmlen(func_pcs)];
+	for (int i=0;i<hmlen(func_pcs);i++) all_pcs[i] = func_pcs[i].key;
+
 	uint32_t ph_mul, ph_shift, ph_mask;
-	if (!find_perfect_hash(func_pcs, &ph_mul, &ph_shift, &ph_mask)) panic("cannot find perfect hash for functions");
+	if (!find_perfect_hash(all_pcs, hmlen(func_pcs), &ph_mul, &ph_shift, &ph_mask)) panic("cannot find perfect hash for functions");
 
 	int *htable = calloc((ph_mask+1), sizeof(int));
-	for (int i=0;i<arrlen(func_pcs);i++) {
-		int idx = ((func_pcs[i] * ph_mul) >> ph_shift) & ph_mask;
+	for (int i=0;i<hmlen(func_pcs);i++) {
+		int idx = ((func_pcs[i].key * ph_mul) >> ph_shift) & ph_mask;
 		assert(htable[idx] == 0);
 		htable[idx] = i+1;
 	}
@@ -447,14 +475,15 @@ int main(int argc, char *argv[]) {
 	printf("Generating hle_index.c...\n");
 
 	fprintf(out, "#include \"hle_index.h\"\n\n");
-	for (int i=0;i<arrlen(func_pcs);i++) 
-		fprintf(out, "extern uint32_t func_%08X(m68ki_cpu_core *cpu, int *cycles, uint32_t pc);\n", func_pcs[i]);
+	for (int i=0;i<hmlen(func_pcs);i++) 
+		if (func_pcs[i].key == func_pcs[i].value)
+			fprintf(out, "extern uint32_t func_%08X(m68ki_cpu_core *cpu, int *cycles, uint32_t pc);\n", func_pcs[i].value);
 
 	fprintf(out, "\nconst HLEFunc g_hle_funcs[%d] = {\n", ph_mask+1);
 	for (int i=0;i<ph_mask+1;i++) {
 		int idx = htable[i];
 		if (idx > 0)
-			fprintf(out, "\t[%d] = { .pc = 0x%08x, .func = func_%08X },\n", i, func_pcs[idx-1], func_pcs[idx-1]);
+			fprintf(out, "\t[%d] = { .pc = 0x%08x, .func = func_%08X },\n", i, func_pcs[idx-1].key, func_pcs[idx-1].value);
 	}
 	fprintf(out, "};\n");
 	fclose(out);

@@ -38,6 +38,7 @@
 
 #define M68K_RECOMPILER
 #include "m68kcpu.h"
+#include <assert.h>
 
 #undef REG_IR
 
@@ -156,7 +157,8 @@
 #define OPER_PCIX_16()  ({uint ea = EA_PCIX_16();   m68ki_read_pcrel_16(ea);})
 #define OPER_PCIX_32()  ({uint ea = EA_PCIX_32();   m68ki_read_pcrel_32(ea);})
 
-#define m68ki_jump(pc)  ({ REG_PC = pc; })
+#define m68ki_jump(pc)       ({ REG_PC = pc; })
+#define m68ki_branch_8(pc)   ({ REG_PC += MAKE_INT_8(pc); })
 
 #define m68ki_cpu (*__m68ki_cpu)
 #define m68ki_remaining_cycles (*__m68ki_remaining_cycles)
