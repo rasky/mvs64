@@ -298,7 +298,7 @@ static uint dasm_read_imm_32(uint advance)
 {
 	uint result;
 	if (g_rawop)
-		result = (g_rawop[g_cpu_pc + 0 - g_rawbasepc] << 24) |
+		result = ((uint)g_rawop[g_cpu_pc + 0 - g_rawbasepc] << 24) |
 		         (g_rawop[g_cpu_pc + 1 - g_rawbasepc] << 16) |
 		         (g_rawop[g_cpu_pc + 2 - g_rawbasepc] << 8) |
 		          g_rawop[g_cpu_pc + 3 - g_rawbasepc];
