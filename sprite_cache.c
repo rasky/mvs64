@@ -136,7 +136,7 @@ void sprite_cache_pop(SpriteCache *c) {
 		bidx = (bidx+1) & (c->num_buckets-1);
 	}
 
-	if (c->tick_cutoff <= c->cur_tick)
+	if (!removed_one && c->tick_cutoff <= c->cur_tick)
 	{
 		c->tick_cutoff++;
 		sprite_cache_pop(c);
