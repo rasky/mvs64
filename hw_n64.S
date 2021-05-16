@@ -105,6 +105,10 @@ tlbcallhandler:
 	li a1, 2
 	beq t0, 0x24, tlb_readhwio   # LBU
 	li a1, 1
+	beq t0, 0x22, tlb_readhwio   # LWL (treat as LW)
+	li a1, 4
+	beq t0, 0x26, tlb_restore    # LWR (ignore, we emulate on LWL)
+	li a1, 4
 
 	beq t0, 0x2B, tlb_writehwio  # SW
 	li a2, 4
