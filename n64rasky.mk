@@ -8,7 +8,7 @@ N64_HEADERPATH = $(N64_ROOTDIR)/mips64-elf/lib
 N64_TOOL = $(N64_ROOTDIR)/bin/n64tool
 N64_HEADERNAME = header
 
-N64_CFLAGS = -DN64 -falign-functions=32 -ffunction-sections -fdata-sections -std=gnu99 -march=vr4300 -mtune=vr4300 -O2 -Wall -Werror -fdiagnostics-color=always -I$(ROOTDIR)/mips64-elf/include
+N64_CFLAGS = -DN64 -falign-functions=32 -ffunction-sections -fdata-sections -std=gnu99 -march=vr4300 -mtune=vr4300 -O2 -Wall -Werror -I$(ROOTDIR)/mips64-elf/include
 N64_ASFLAGS = -mtune=vr4300 -march=vr4300 -Wa,--fatal-warnings
 N64_LDFLAGS = -L$(N64_ROOTDIR)/mips64-elf/lib -ldragon -lc -lm -ldragonsys -Tn64.ld --gc-sections
 
@@ -18,6 +18,8 @@ N64_LD = $(N64_GCCPREFIX)ld
 N64_OBJCOPY = $(N64_GCCPREFIX)objcopy
 
 N64_ROM_TITLE = "N64 ROM"
+
+CFLAGS += -fdiagnostics-color=always
 
 ifeq ($(D),1)
 CFLAGS+=-g3
