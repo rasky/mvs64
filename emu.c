@@ -132,22 +132,21 @@ void emu_run_frame(void) {
     g_frame++;
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
+	#ifndef N64
+	if (argc < 2) {
+		fprintf(stderr, "Usage:\n    mvs64 <romdir>\n");
+		return 1;
+	}
+	#endif
+
 	plat_init(44100, FPS);
 	plat_enable_video(true);
 
 	#ifdef N64
-	rom_load_bios("rom:/");
-	rom_load_mslug("rom:/");
+	rom_load("rom:/");
 	#else
-	rom_load_bios("roms/bios/");
-	rom_load_mslug("roms/mslug64/");
-	// rom_load_aof("roms/aof/");
-	// rom_load_kof98("roms/kof98/");
-	// rom_load_samsho("roms/samsho/");
-	// rom_load_spriteex("roms/spriteex/");
-	// rom_load_nyanmvs("roms/nyanmvs/");
-	// rom_load_krom("roms/krom/");
+	rom_load(argv[1]);
 	#endif
 
 	m68k_init();

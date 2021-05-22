@@ -165,6 +165,10 @@ static void rom(const char *dir, const char* name, int off, int sz, uint8_t *buf
 
 	FILE *f = fopen(fullname, "rb");
 	assertf(f, "file not found: %s", fullname);
+	if (!sz) {
+		fseek(f, 0, SEEK_END);
+		sz = ftell(f);
+	}
 	fseek(f, off, SEEK_SET);
 	int read = fread(buf, 1, sz, f);
 	fclose(f);
@@ -179,9 +183,28 @@ static void rom(const char *dir, const char* name, int off, int sz, uint8_t *buf
 	}
 }
 
+#define strcatalloc(a, b) ({ char v[strlen(a)+strlen(b)+1]; strcpy(v, a); strcat(v, b); strdup(v); })
+
 void rom_next_frame(void) {
 	sprite_cache_tick(&srom_cache);
 	sprite_cache_tick(&crom_cache);
+}
+
+void rom_load(const char *dir) {
+	rom(dir, "p.bios", 0, 0, BIOS, false);
+	rom(dir, "p.rom", 0, 0, P_ROM, false);
+	
+	#ifdef N64
+	dir = "";
+	#endif
+	
+	srom_fn[0] = strcatalloc(dir, "s.bios");
+	srom_fn[1] = strcatalloc(dir, "s.rom");
+	crom_fn[0] = strcatalloc(dir, "c.rom");
+
+	rom_cache_init();
+	srom_set_bank(0);  // Set SFIX as current
+	crom_set_bank(0);
 }
 
 void rom_load_bios(const char *dir) {
