@@ -3,6 +3,17 @@
 <img src="https://github.com/rasky/mvs64/raw/main/screens/image0.jpg" width="320">
 <img src="https://github.com/rasky/mvs64/raw/main/screens/pbobblen.png" width="320">
 
+### Status
+
+This emulator is in **VERY EARLY STAGE**. Only a handful of games boot or
+work.
+
+Performance on N64 is still not very good, most games do not run at full frame
+rate yet.
+
+Sound is not emulated yet.
+
+
 ### How to build
 
 MVS64 is written using [libdragon](https://github.com/DragonMinded/libdragon).
