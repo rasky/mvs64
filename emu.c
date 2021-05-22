@@ -115,7 +115,8 @@ void emu_run_frame(void) {
 
     // Run all events that are scheduled before next vsync
     while ((e = next_event()) && (e->clock < vsync)) {
-        g_clock = m68k_exec(e->clock);
+        m68k_exec(e->clock);
+        g_clock = e->clock;
 
         // Call the event callback, and check if it must be repeated.
         uint32_t repeat = e->cb(e->cbarg);
@@ -123,11 +124,11 @@ void emu_run_frame(void) {
         else e->cb = NULL;
     }
 
-    g_clock = m68k_exec(vsync);
+    int64_t clk68 = m68k_exec(vsync);
+    g_clock = vsync;
 
     // Frame completed
-	debugf("[EMU] Frame completed: %d (vsync: %llu, g_clock: %llu)\n", g_frame, vsync, g_clock);
-    g_clock = vsync;
+	debugf("[EMU] Frame completed: %d (vsync: %llu, m68k: %llu)\n", g_frame, vsync, clk68);
     g_frame++;
 }
 
