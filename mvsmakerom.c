@@ -17,6 +17,7 @@ typedef struct {
 } Romset;
 
 typedef struct {
+	int code;
 	uint8_t *PROM; int prom_size;
 	uint8_t *CROM; int crom_size;
 	uint8_t *SROM; int srom_size;
@@ -243,6 +244,16 @@ void load_game(const char *fn, Game *game) {
 	}
 
 	if (memcmp(game->PROM+0x100, "NEO-GEO", 7)) panic("error: cannot detect PROM layout\n");
+
+	game->code = ((int)game->PROM[0x108] << 8) | game->PROM[0x109];
+}
+
+void patch_game(Game *game) {
+	switch (game->code) {
+	case 0x44: // aof
+		byteswap(game->CROM+2*1024*1024, 1, game->CROM+4*1024*1024, 1, 2*1024*1024);
+		break;
+	}
 }
 
 int main(int argc, char *argv[]) {
@@ -262,6 +273,8 @@ int main(int argc, char *argv[]) {
 
 	Game game;
 	load_game(argv[2], &game);
+
+	patch_game(&game);
 
 	char outfn[strlen(argv[2])+16];
 	strcpy(outfn, argv[2]);
