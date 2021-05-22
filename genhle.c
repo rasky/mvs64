@@ -180,7 +180,7 @@ bool find_perfect_hash(uint32_t *nums, int sz, uint32_t* ph_mul, uint32_t* ph_sh
 	*ph_mask |= *ph_mask >> 16;
 
 	// Increase the mask (and thus hash table size) until a certain upper bound (2**24)
-	for (;*ph_mask != 0x00FFFFFF;*ph_mask = (*ph_mask<<1)|1) {	
+	for (;*ph_mask != 0x000FFFFF;*ph_mask = (*ph_mask<<1)|1) {	
 		int nslots = *ph_mask+1;
 		bool slot_used[nslots];
 		// Try all primes
