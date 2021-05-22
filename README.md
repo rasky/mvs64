@@ -1,7 +1,7 @@
 ## MVS64 -- A NeoGeo emulator for Nintendo 64
 
-![screens/image0.jpg]
-![screens/pbobblen.png]
+<img src="https://github.com/rasky/mvs64/raw/main/screens/image0.jpg" width="320">
+<img src="https://github.com/rasky/mvs64/raw/main/screens/pbobblen.png" width="320">
 
 ### How to build
 
