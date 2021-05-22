@@ -42,6 +42,9 @@ static void render_fix(void) {
 static void render_sprites(void) {
 	int sx = 0, sy = 0, ss = 0;
 
+	uint8_t aa;
+	bool aa_enabled = lspc_get_auto_animation(&aa);
+
 	render_begin_sprites();
 
 	for (int snum=0;snum<381;snum++) {
@@ -75,6 +78,11 @@ static void render_sprites(void) {
 
 			tnum |= (tc << 12) & 0xF0000;
 			int palnum = ((tc >> 8) & 0xFF);
+
+			if (aa_enabled) {
+				if (tc & 8)      { tnum &= ~7; tnum |= aa & 7; }
+				else if (tc & 4) { tnum &= ~3; tnum |= aa & 3; }
+			}
 
 			draw_sprite(tnum, palnum, sx, ssy, tc&1, tc&2);
 		}
