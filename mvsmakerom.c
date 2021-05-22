@@ -131,14 +131,14 @@ bool is_bios(char *fn) {
 int romtype(char *fn, char ch) {
 	char *pt = fn-1;
 	while ((pt = strchr(pt+1, ch))) {
-		int idx = atoi(pt+1);
-		if (idx > 0) return idx;
+		if (pt[1] >= '1' && pt[1] <= '9')
+			return pt[1]-'0';
 	}
 	return 0;
 }
 
 void romset_add(Romset *r, int idx, mz_zip_archive_file_stat *stat) {
-	if (idx >= sizeof(r->fn)/sizeof(r->fn[0])) panic("invalid ROM index: %d (%s)", idx, stat->m_filename);
+	if (idx >= sizeof(r->fn)/sizeof(r->fn[0])) panic("invalid ROM index: %d (%s)\n", idx, stat->m_filename);
 	if (r->fn[idx-1]) panic("duplicated rom at %d: %s %s\n", idx, r->fn[idx-1], stat->m_filename);
 	r->fn[idx-1] = strdup(stat->m_filename);
 	r->size[idx-1] = stat->m_uncomp_size;
@@ -206,6 +206,7 @@ void load_game(const char *fn, Game *game) {
 		int idx;
 		if (is_bios(fn)) continue;
 		if ((idx = romtype(fn, 'p'))) romset_add(&P, idx, &stat);
+		if ((idx = romtype(fn, 'g'))) romset_add(&P, idx, &stat); // some PROMs are called pg1/pg2
 		if ((idx = romtype(fn, 's'))) romset_add(&S, idx, &stat);
 		if ((idx = romtype(fn, 'c'))) romset_add(&C, idx, &stat);
 	}
