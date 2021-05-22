@@ -341,11 +341,13 @@ int main(int argc, char *argv[]) {
 			static const char *branches_off_8[] =  { "m68k_op_beq_8",  "m68k_op_bne_8",  "m68k_op_blt_8",  "m68k_op_bgt_8",  "m68k_op_bcc_8",  "m68k_op_dbf_8",  "m68k_op_bra_8",  NULL };
 			static const char *branches_off_16[] = { "m68k_op_beq_16", "m68k_op_bne_16", "m68k_op_blt_16", "m68k_op_bgt_16", "m68k_op_bcc_16", "m68k_op_dbf_16", "m68k_op_bra_16", NULL };
 			static const char *jump_tables[] = { "m68k_op_jmp_32_pc", NULL };
-			static const char *calls[] = { "m68k_op_bsr_8", "m68k_op_bsr_16", NULL };
+			static const char *calls[] = { "m68k_op_bsr_", "m68k_op_jsr_", NULL };
 
+			bool is_backward_branch = false;
 			char goto_next[24]; unsigned int target=0;
 			if (stranyprefix(oph->opcode_handler, branches_off_16)) {
 				target = pc + 2 + (int16_t)be16(func+2);
+				is_backward_branch = target < pc;
 				sprintf(goto_next, "goto op_%08X;", target);
 				if (!strstartwith(oph->opcode_handler, "m68k_op_bra_")) {
 					replace_word(body, "m68ki_branch_16(offset);", "", 1);
@@ -355,6 +357,7 @@ int main(int argc, char *argv[]) {
 				}
 			} else if (stranyprefix(oph->opcode_handler, branches_off_8)) {
 				target = pc + 2 + (int8_t)op;
+				is_backward_branch = target < pc;
 				sprintf(goto_next, "goto op_%08X;", target);
 				replace_word(body, "m68ki_branch_8(MASK_OUT_ABOVE_8(REG_IR));", goto_next, 1);
 				if (!strstartwith(oph->opcode_handler, "m68k_op_bra_"))
@@ -387,6 +390,8 @@ int main(int argc, char *argv[]) {
 						}
 						strcat(jumptable, "\t\t};\n");
 						strcat(body, jumptable);
+
+						hmput(forward_jumps, pc + oplen + ddlen*ddstep, true);
 					} else {
 						panic("cannot decode duffdevice at %x, instruction: %s", pc+2, disasm);
 					}
@@ -404,15 +409,15 @@ int main(int argc, char *argv[]) {
 			// For specific cases like direct branches or duff devices, the code
 			// above as already tried to decode the target inline to speed it up,
 			// but we keep this as a final fallback in case anything fails.
-			if (strstr(body, "m68ki_jump")) {
-				fprintf(out, "\t\tgoto exit;\n");
-
-			} else if (stranyprefix(oph->opcode_handler, calls)) {
+			if (stranyprefix(oph->opcode_handler, calls)) {
 				fprintf(out, "\t\tgoto exit;\n");
 				// The opcode after the subroutine call is a possible re-entrypoint
 				// of the function.
 				arrput(entrypoints, pc+oplen);
 				hmput(func_pcs, pc+oplen, initial_pc);
+
+			} else if (strstr(body, "m68ki_jump")) {
+				fprintf(out, "\t\tgoto exit;\n");
 
 			// If the opcode body still contains a branch, it's a bug because we
 			// need to handle all branches one way or another as goto.
@@ -434,12 +439,13 @@ int main(int argc, char *argv[]) {
 			func += oplen;
 			if (++opcount > 10000) panic("function too long -- missing end of function");
 
-			// See if this is a possible exit point
-			if (strstr(oph->opcode_handler, "m68k_op_rts_")) {
+			// See if this is a possible exit point: search for an absolute jump
+			if (strstr(oph->opcode_handler, "m68k_op_rts_") || (strstr(oph->opcode_handler, "m68k_op_bra_") && is_backward_branch)) {
 				// Exit only if the next instruction was not the target of a forward jump.
 				// Otherwise, this is not a terminating instruction.
-				if (hmgeti(forward_jumps, pc) < 0)
+				if (hmgeti(forward_jumps, pc) < 0) {
 					break;
+				}
 			}
 		}
 
