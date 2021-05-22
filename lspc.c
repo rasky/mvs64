@@ -27,6 +27,10 @@ static void lspc_vram_modulo_w(uint16_t val) {
 	// debugf("[HWIO] vram mod=%02x\n", reg_vrammod	); 
 }
 
+static uint16_t lspc_vram_modulo_r(void) {
+	return reg_vrammod;
+}
+
 static uint16_t lspc_mode_r() {
 	int64_t clk = emu_clock_frame();
 	int line = clk / (MVS_CLOCK / FPS / 264);

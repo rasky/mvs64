@@ -91,7 +91,11 @@ uint32_t read_hwio(uint32_t addr, int sz)  {
 	} else if ((addr>>16) == 0x3A) switch (addr&0xFFFF) {
 
 	} else if ((addr>>16) == 0x3C) switch (addr&0xFFFF) {
+		case 0x00: case 0x08: case 0x0A:
 		case 0x02: assert(sz==2); return lspc_vram_data_r();
+		case 0x0C:
+		case 0x04: assert(sz==2); return lspc_vram_modulo_r();
+		case 0x0E:
 		case 0x06: assert(sz==2); return lspc_mode_r();
 	}
 
