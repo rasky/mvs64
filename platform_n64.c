@@ -65,7 +65,7 @@ void plat_beginframe(void) {
 	g_screen_pitch = 320*2;
 
     rdp_attach_display(rdp_disp);
-	rdp_set_default_clipping();
+	rdp_set_clipping(0, 0, 320, 224);
 }
 
 void plat_endframe(void) {
