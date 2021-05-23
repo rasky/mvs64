@@ -8,6 +8,7 @@
 #define FPS        		  60
 #define FRAME_CLOCK       (MVS_CLOCK / FPS)
 #define LINE_CLOCK        (FRAME_CLOCK / 264)
+#define WATCHDOG_PERIOD   3244030
 
 #define MAX_EVENTS 8
 

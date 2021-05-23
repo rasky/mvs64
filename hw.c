@@ -44,6 +44,7 @@ static Bank banks[16];
 #include "rtc.c"
 #include "lspc.c"
 #include "input.c"
+#include "watchdog.c"
 
 #define DIPSW_SETTINGS_MODE    (1<<0)
 #define DIPSW_FREEPLAY         (1<<6)
@@ -118,7 +119,7 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 	// debugf("[HWIO] write%d: %06x <- %0*x (68K PC:%x EPC:%lx)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, m68k_get_reg(NULL, M68K_REG_PC), C0_READ_EPC());
 
 	if ((addr>>16) == 0x30) switch (addr&0xFFFF) {
-		case 0x01: return; // watchdog
+		case 0x01: watchdog_kick(); return;
 
 	} else if ((addr>>16) == 0x32) switch (addr&0xFFFF) {
 		case 0x00: assert(sz==1); debugf("[HWIO] Send Z80 command: %02x\n", (unsigned int)val); return;
@@ -374,6 +375,7 @@ void hw_init(void) {
 	#endif
 
 	rtc_init();
+	watchdog_init();
 }
 
 void hw_vblank(void) {
