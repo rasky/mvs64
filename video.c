@@ -24,8 +24,7 @@ static void render_fix(void) {
 
 	render_begin_fix();
 
-	fix += 32; // skip first column
-	for (int i=0;i<38;i++) {
+	for (int i=0;i<40;i++) {
 		fix += 2; // skip two lines
 		for (int j=0;j<28;j++) {
 			uint16_t v = *fix++;
