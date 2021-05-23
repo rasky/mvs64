@@ -71,7 +71,7 @@ uint32_t read_hwio(uint32_t addr, int sz)  {
 
 	// Idle skip for RTC Wait Pulse in BIOS boot
 	if (addr == 0x320001 && m68k_get_reg(NULL, M68K_REG_PC) == 0xC11DA2) {
-		m68k_end_timeslice();
+		m68k_consume_timeslice();
 	}
 
 	// debugf("[HWIO] read%d: %06x (68K PC:%x)\n", sz*8, (unsigned int)addr, m68k_get_reg(NULL, M68K_REG_PC));

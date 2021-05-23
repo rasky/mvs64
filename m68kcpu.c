@@ -1006,7 +1006,7 @@ int m68k_execute(int num_cycles)
 		SET_CYCLES(0);
 
 	/* return how many clocks we used */
-	/* RASKY: changed this to make sure that after calling m68k_end_timeslice,
+	/* RASKY: changed this to make sure that after calling m68k_consume_timeslice,
 	 * m68k_run reports that the timeslice was fully consumed (for idle skip!) */
 	int spent_cycles = m68ki_initial_cycles - GET_CYCLES();
 	m68ki_initial_cycles = 0;
@@ -1032,13 +1032,15 @@ void m68k_modify_timeslice(int cycles)
 	ADD_CYCLES(cycles);
 }
 
+void m68k_consume_timeslice(void)
+{
+	SET_CYCLES(0);
+}
+
 
 void m68k_end_timeslice(void)
 {
-	/* RASKY: changed this to make sure that after calling m68k_end_timeslice,
-	 * m68k_run reports that the timeslice was fully consumed (for idle skip!) */
-	/* m68ki_initial_cycles = GET_CYCLES(); */
-	SET_CYCLES(0);
+	m68k_modify_timeslice(-m68k_cycles_remaining());
 }
 
 
