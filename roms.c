@@ -185,6 +185,20 @@ static void rom(const char *dir, const char* name, int off, int sz, uint8_t *buf
 
 #define strcatalloc(a, b) ({ char v[strlen(a)+strlen(b)+1]; strcpy(v, a); strcat(v, b); strdup(v); })
 
+static uint32_t ini_get_integer(const char *ini, const char *key, bool *ok) {
+	int klen = strlen(key); char *kv; 
+	if ((kv = strstr(ini, key)) && kv[klen] == '=') {
+		kv += klen+1;
+		if (ok) *ok = true;
+		if (kv[0] == '0' && kv[1] == 'x')
+			return strtoul(kv, NULL, 16);
+		else
+			return strtoul(kv, NULL, 10);
+	}
+	if (ok) *ok=false;
+	return 0;
+}
+
 void rom_next_frame(void) {
 	sprite_cache_tick(&srom_cache);
 	sprite_cache_tick(&crom_cache);
@@ -193,7 +207,21 @@ void rom_next_frame(void) {
 void rom_load(const char *dir) {
 	rom(dir, "p.bios", 0, 0, BIOS, false);
 	rom(dir, "p.rom", 0, 0, P_ROM, false);
-	
+
+	char ini[1024];
+	strcpy(ini, dir);
+	strcat(ini, "game.ini");
+	FILE *f = fopen(ini, "rb");
+	if (f) {
+		fread(ini, 1, sizeof(ini), f);
+		fclose(f);
+
+		bool ok;
+
+		rom_pc_idle_skip = ini_get_integer(ini, "idle_skip", &ok);
+		if (ok) debugf("[ROM] configure idle_skip: %x\n", rom_pc_idle_skip);
+	}
+
 	#ifdef N64
 	dir = "";
 	#endif
