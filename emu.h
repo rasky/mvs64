@@ -2,6 +2,7 @@
 #define EMU_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #define MVS_CLOCK         24000000
 #define M68K_CLOCK_DIV    2
@@ -18,6 +19,7 @@ typedef struct {
     int64_t clock;
     EmuEventCb cb;
     void *cbarg;
+    bool current;
 } EmuEvent;
 
 int emu_add_event(int64_t clock, EmuEventCb cb, void *cbarg);

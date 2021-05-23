@@ -79,6 +79,7 @@ int emu_add_event(int64_t clock, EmuEventCb cb, void *cbarg) {
         events[i].clock = clock;
         events[i].cb = cb;
         events[i].cbarg = cbarg;
+        events[i].current = false;
         return i;
     }
     assert(0);
@@ -86,7 +87,8 @@ int emu_add_event(int64_t clock, EmuEventCb cb, void *cbarg) {
 
 void emu_change_event(int event_id, int64_t newclock) {
 	events[event_id].clock = newclock;
-	m68k_end_timeslice();
+	if (events[event_id].current)
+		m68k_end_timeslice();
 }
 
 int64_t emu_clock(void) {
@@ -115,7 +117,9 @@ void emu_run_frame(void) {
 
     // Run all events that are scheduled before next vsync
     while ((e = next_event()) && (e->clock < vsync)) {
+    	e->current = true;
         g_clock = m68k_exec(e->clock);
+        e->current = false;
 
         // Call the event callback, and check if it must be repeated.
         if (g_clock >= e->clock) {    	
