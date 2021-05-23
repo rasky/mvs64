@@ -1,7 +1,7 @@
 
 static int watchdog_event;
 
-static unsigned int watchdog_expired(void* arg) {
+static uint32_t watchdog_expired(void* arg) {
 	debugf("[HW] Watchdog expired! Rebooting\n");
 	m68k_pulse_reset();
 	return WATCHDOG_PERIOD;

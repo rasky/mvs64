@@ -29,22 +29,10 @@ tlb_start:
 	# so that it points to the delay slot itself, so that the following code
 	# can refer to EPC as the faulting memory read/write.
 	mfc0 k0, C0_CAUSE
-	bgez k0, tlb_start_checkaddr    # Bit 31: BD (exception in delay slot)
+	bgez k0, tlbcallhandler    # Bit 31: BD (exception in delay slot)
 	mfc0 k0, C0_EPC
 	addi k0, 4
 	mtc0 k0, C0_EPC
-
-tlb_start_checkaddr:
-	# If the TLB exception is caused by a write to 0x300001, it's the watchdog.
-	# This is very common. We special case it by ignoring all writes to it,
-	# without going through the full exception handler.
-	li k0, 0x300001
-	bne k0, k1, tlbcallhandler
-	mfc0 k0, C0_CAUSE
-	andi k0, 0x7F
-	li k1, C0_CAUSE_TLBSTORE<<2   # CAUSE_TLBSTORE = memory write
-	beq k0, k1, tlbdone
-	nop
 
 tlbcallhandler:
 	# Save all caller-saved registers
