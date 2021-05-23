@@ -1,34 +1,40 @@
 
-static uint16_t reg_vramaddr;
-static uint16_t reg_vrammod;
+static uint16_t *reg_vram_bank;
+static uint16_t reg_vram_addr;
+static uint16_t reg_vram_mod;
+static uint16_t reg_vram_mask;
 static uint16_t reg_lspcmode;
 static uint8_t lspc_aa_counter;
 static uint8_t lspc_aa_tick;
 
 static void lspc_vram_data_w(uint16_t val) {
-	assertf(reg_vramaddr < sizeof(VIDEO_RAM)/2, "Invalid VRAM address: %02x", reg_vramaddr);
-	VIDEO_RAM[reg_vramaddr] = val; 
-
-	reg_vramaddr = (reg_vramaddr & 0x8000) | ((reg_vramaddr+reg_vrammod) & 0x7FFF);
+	reg_vram_bank[reg_vram_addr] = val;
+	reg_vram_addr += reg_vram_mod;
+	reg_vram_addr &= reg_vram_mask;
 }
 
 static uint16_t lspc_vram_data_r(void) {
-	assertf(reg_vramaddr < sizeof(VIDEO_RAM)/2, "Invalid VRAM address: %02x", reg_vramaddr);
-	return VIDEO_RAM[reg_vramaddr];
+	return reg_vram_bank[reg_vram_addr];
 }
 
 static void lspc_vram_addr_w(uint32_t val) {
-	reg_vramaddr = val;
-	// debugf("[HWIO] vram addr=%04x (PC:%06x)\n", reg_vramaddr, (unsigned int)emu_pc());
+	if (!(val & 0x8000)) {
+		reg_vram_bank = VIDEO_RAM;
+		reg_vram_mask = 0x7FFF;
+	} else {
+		reg_vram_bank = VIDEO_RAM + 0x8000;
+		reg_vram_mask = 0x7FF;		
+	}
+
+	reg_vram_addr = val & reg_vram_mask;
 }
 
 static void lspc_vram_modulo_w(uint16_t val) {
-	reg_vrammod = val;
-	// debugf("[HWIO] vram mod=%02x\n", reg_vrammod	); 
+	reg_vram_mod = val;
 }
 
 static uint16_t lspc_vram_modulo_r(void) {
-	return reg_vrammod;
+	return reg_vram_mod;
 }
 
 static uint16_t lspc_mode_r() {
