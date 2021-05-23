@@ -10,6 +10,8 @@
 #define panic(s, ...) ({ fprintf(stderr, s, ##__VA_ARGS__); exit(1); })
 #define strstartwith(s, prefix) !strncmp(s, prefix, strlen(prefix))
 
+extern const char* game_ini[65536];
+
 typedef struct {
 	char *fn[32];
 	int size[32];
@@ -17,7 +19,7 @@ typedef struct {
 } Romset;
 
 typedef struct {
-	int code;
+	uint16_t code;
 	uint8_t *PROM; int prom_size;
 	uint8_t *CROM; int crom_size;
 	uint8_t *SROM; int srom_size;
@@ -118,7 +120,7 @@ uint8_t* readall(const char *fn, int *sz) {
 	return ROM;
 }
 
-void saveto(uint8_t *data, int size, const char *fn) {
+void saveto(const uint8_t *data, int size, const char *fn) {
 	FILE *f = fopen(fn, "wb"); if (!f) panic("error: cannot create: %s", fn);
 	fwrite(data, 1, size, f);
 	fclose(f);
@@ -300,4 +302,16 @@ int main(int argc, char *argv[]) {
 
 	outfn[off] = 's';
 	saveto(bios.SROM, bios.srom_size, outfn);
+
+	const char *ini = game_ini[game.code];
+	if (ini) {
+		strcpy(outfn+off, "game.ini");
+		saveto(ini, strlen(ini), outfn);
+	}
 }
+
+
+const char* game_ini[65536] = {
+	/* mslug */     [0x0201] = "idle_skip=0x1FE2\n",
+	/* samsho */    [0x0045] = "idle_skip=0xF7E\n",
+};
