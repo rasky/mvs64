@@ -56,7 +56,7 @@ static void write_unk(uint32_t addr, uint32_t val, int sz) {
 static void write_bankswitch(uint32_t addr, uint32_t val, int sz) {
 	if (addr >= 0x2FFFF0 && addr <= 0x2FFFFF) {
 		val &= 7;
-		debugf("[CART] bankswitch %x <= %x\n", addr, (unsigned int)val);
+		debugf("[CART] bankswitch %x <= %x\n", (unsigned int)addr, (unsigned int)val);
 		banks[0x2].mem = P_ROM + (val+1)*0x100000;
 		return;
 	}
