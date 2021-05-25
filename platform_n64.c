@@ -10,8 +10,10 @@ static int rdp_disp;
 void plat_init(int audiofreq, int fps) {
 	init_interrupts();
 
+#ifdef __LIBDRAGON_DEBUG_H
     debug_init_isviewer();
     debug_init_usblog();
+#endif
     debugf("MVS64\n");
 
     char *heap_top = (char*)0x80000000 + get_memory_size() - 0x10000;
