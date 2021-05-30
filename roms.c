@@ -32,6 +32,8 @@ static FILE *crom_file = NULL;
 static FILE *srom_file = NULL;
 #endif
 
+static unsigned int crom_mask;
+
 static void rom_cache_init(void) {
 	sprite_cache_init(&srom_cache, 4*8, 256);
 	sprite_cache_init(&crom_cache, 8*16, 768);
@@ -57,6 +59,8 @@ uint8_t* srom_get_sprite(int spritenum) {
 }
 
 uint8_t* crom_get_sprite(int spritenum) {
+	spritenum &= crom_mask;
+	
 	uint8_t *pix = sprite_cache_lookup(&crom_cache, spritenum);
 	if (pix) return pix;
 
@@ -96,66 +100,32 @@ void srom_set_bank(int bank) {
 
 void crom_set_bank(int bank) {
 	assert(bank == 0);
+	unsigned len;
 
 	#ifdef N64
 	if (crom_file != -1) dfs_close(crom_file);
 	crom_file = dfs_open(crom_fn[bank]);
 	assertf(crom_file >= 0, "cannot open: %s", crom_fn[bank]);
+	len = dfs_size(crom_file);
 	#else
 	if (crom_file) fclose(crom_file);
 	crom_file = fopen(crom_fn[bank], "rb");
 	assertf(crom_file, "cannot open: %s", crom_fn[bank]);
+	fseek(crom_file, 0, SEEK_END);
+	len = ftell(crom_file);
 	#endif
 
 	sprite_cache_reset(&crom_cache);
-}
 
-void fixrom_preprocess(uint8_t *rom, int sz) {
-	#define NIBBLE_SWAP(v_) ({ uint8_t v = (v_); (((v)>>4) | ((v)<<4)); })
-	uint8_t buf[4*8];
-
-	for (int i=0; i<sz; i+=4*8) {
-		uint8_t *c0 = &rom[16], *c1 = &rom[24], *c2 = &rom[0], *c3 = &rom[8];
-		uint8_t *d = buf;
-		for (int j=0;j<8;j++) {
-			*d++ = NIBBLE_SWAP(*c0++);
-			*d++ = NIBBLE_SWAP(*c1++);
-			*d++ = NIBBLE_SWAP(*c2++);
-			*d++ = NIBBLE_SWAP(*c3++);
-		}
-		memcpy(rom, buf, 4*8);
-		rom += 4*8;
-	}
-}
-
-void crom_preprocess(uint8_t *rom0, int sz) {
-	uint8_t *buf0 = calloc(1, sz), *buf = buf0, *rom = rom0;
-	uint8_t *c1 = rom, *c2 = rom+sz/2;
-	
-	for (int i=0;i<sz;i+=8*16) {
-		for (int b=0;b<4;b++) {
-			uint8_t *dst = buf + (b&1)*64 + ((b^2)&2)*2;
-			for (int y=0;y<8;y++) {
-				for (int x=0;x<8;x+=2) {
-					uint8_t px4 = (c1[0] >> (x)) & 1;
-					uint8_t px5 = (c1[1] >> (x)) & 1;
-					uint8_t px6 = (c2[0] >> (x)) & 1;
-					uint8_t px7 = (c2[1] >> (x)) & 1;
-					uint8_t px0 = (c1[0] >> (x+1)) & 1;
-					uint8_t px1 = (c1[1] >> (x+1)) & 1;
-					uint8_t px2 = (c2[0] >> (x+1)) & 1;
-					uint8_t px3 = (c2[1] >> (x+1)) & 1;
-					dst[x/2] = (px7<<7)|(px6<<6)|(px5<<5)|(px4<<4)|(px3<<3)|(px2<<2)|(px1<<1)|(px0<<0);
-				}
-				c1 += 2; c2 += 2;
-				dst += 8;
-			}
-		}
-		buf += 8*16;
-	}
-
-	memcpy(rom0, buf0, sz);
-	free(buf0);
+	// Calculate mask based on next power of two
+	len /= 8*16;
+	len -= 1;
+	len |= len >> 1;
+	len |= len >> 2;
+	len |= len >> 4;
+	len |= len >> 8;
+	len |= len >> 16;
+	crom_mask = len;
 }
 
 static void rom(const char *dir, const char* name, int off, int sz, uint8_t *buf, bool bswap) {
