@@ -28,7 +28,7 @@ static void dl_flush(bool force) {
 	}
 }
 
-static void draw_sprite(int spritenum, int palnum, int x0, int y0, bool flipx, bool flipy) {
+static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int sh, bool flipx, bool flipy) {
 	const int w = 16, h = 16;
 	uint8_t *src = crom_get_sprite(spritenum);
 	uint16_t *pal = PALETTE_RAM + PALETTE_RAM_BANK + palnum*16;
