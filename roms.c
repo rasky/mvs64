@@ -11,7 +11,7 @@
 #ifdef N64
 uint8_t P_ROM[2*1024*1024] __attribute__((aligned(256*1024)));
 #else
-uint8_t P_ROM[2*1024*1024];
+uint8_t P_ROM[8*1024*1024];
 #endif
 
 // Address to trigger idle-skipping
