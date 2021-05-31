@@ -36,7 +36,10 @@ Now build mvs64:
 	$ make mvs64 BIOS=<path/to/bios.bin> ROM=<path/to/game.zip>
 
 When building, you need to specify the path to a NeoGeo BIOS file that you
-want to use, and the path to a NeoGeo game ROM, as a zip file.
+want to use, and the path to a NeoGeo game ROM, as a zip file. Both `BIOS` and
+`ROM` are actually environment variables, so you can set them in your environment
+once to avoid specifying them on the command line (doing that for `BIOS` is
+especially useful, as you rarely change that).
 
 This command will create a Nintendo 64 ROM called `mvs64-<gamename>.z64`, that
 you can use with an emulator or on a real console using a development kit
