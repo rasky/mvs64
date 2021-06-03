@@ -33,6 +33,8 @@ static FILE *srom_file = NULL;
 #endif
 
 static unsigned int crom_mask;
+static unsigned int crom_num_tiles;
+static unsigned int srom_num_tiles;
 
 static void rom_cache_init(void) {
 	sprite_cache_init(&srom_cache, 4*8, 256);
@@ -40,6 +42,7 @@ static void rom_cache_init(void) {
 }
 
 uint8_t* srom_get_sprite(int spritenum) {
+	if (spritenum >= srom_num_tiles) spritenum = srom_num_tiles-1;
 	uint8_t *pix = sprite_cache_lookup(&srom_cache, spritenum);
 	if (pix) return pix;
 
@@ -60,6 +63,7 @@ uint8_t* srom_get_sprite(int spritenum) {
 
 uint8_t* crom_get_sprite(int spritenum) {
 	spritenum &= crom_mask;
+	if (spritenum >= crom_num_tiles) spritenum = crom_num_tiles-1;
 	
 	uint8_t *pix = sprite_cache_lookup(&crom_cache, spritenum);
 	if (pix) return pix;
@@ -81,6 +85,8 @@ uint8_t* crom_get_sprite(int spritenum) {
 
 void srom_set_bank(int bank) {
 	assert(bank == 0 || bank == 1);
+	unsigned len;
+
 	if (srom_bank != bank) {
 		srom_bank = bank;
 
@@ -88,13 +94,17 @@ void srom_set_bank(int bank) {
 		if (srom_file != -1) dfs_close(srom_file);
 		srom_file = dfs_open(srom_fn[srom_bank]);
 		assertf(srom_file >= 0, "cannot open: %s", srom_fn[srom_bank]);
+		len = dfs_size(srom_file);
 		#else
 		if (srom_file) fclose(srom_file);
 		srom_file = fopen(srom_fn[bank], "rb");
 		assertf(srom_file, "cannot open: %s", srom_fn[bank]);
+		fseek(srom_file, 0, SEEK_END);
+		len = ftell(srom_file);
 		#endif
 
 		sprite_cache_reset(&srom_cache);
+		srom_num_tiles = len / (4*8);
 	}
 }
 
@@ -116,6 +126,7 @@ void crom_set_bank(int bank) {
 	#endif
 
 	sprite_cache_reset(&crom_cache);
+	crom_num_tiles = len / (8*16);
 
 	// Calculate mask based on next power of two
 	len /= 8*16;
