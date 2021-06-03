@@ -143,7 +143,7 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 		case 0x02: assert(sz==2); lspc_vram_data_w(val); return;
 		case 0x04: assert(sz==2); lspc_vram_modulo_w(val); return;
 		case 0x06: assert(sz==2); lspc_mode_w(val); return;
-		case 0x0C: assert(sz==2); if (val&1) m68k_set_virq(3,false); if (val&2) m68k_set_virq(2,false); if (val&4) m68k_set_virq(1,false); return;
+		case 0x0C: if (val&1) m68k_set_virq(3,false); if (val&2) m68k_set_virq(2,false); if (val&4) m68k_set_virq(1,false); return;
 	}
 
 	debugf("[HWIO] unknown write%d: %06x <- %0*x (PC=%06x)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, m68k_get_reg(NULL, M68K_REG_PC));
