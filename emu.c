@@ -143,6 +143,8 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "Usage:\n    mvs64 <romdir>\n");
 		return 1;
 	}
+	#else 
+	argc = 0; argv = NULL;
 	#endif
 
 	plat_init(44100, FPS);
