@@ -29,7 +29,7 @@ static void dl_flush(bool force) {
 }
 
 static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int sh, bool flipx, bool flipy) {
-	const int w = 16, h = 16;
+	static const int16_t scale_fx[17] = { 0, (16<<10)/1, (16<<10)/2, (16<<10)/3, (16<<10)/4, (16<<10)/5, (16<<10)/6, (16<<10)/7, (16<<10)/8, (16<<10)/9, (16<<10)/10, (16<<10)/11, (16<<10)/12, (16<<10)/13, (16<<10)/14, (16<<10)/15, (16<<10)/16 };
 	uint8_t *src = crom_get_sprite(spritenum);
 	uint16_t *pal = PALETTE_RAM + PALETTE_RAM_BANK + palnum*16;
 
@@ -62,11 +62,11 @@ static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int s
 	rdl_push(dl,
 		// Load the sprite pixels into the current texture slot
 		RdpSyncTile(),
-		MRdpLoadTex4bpp(0, (uint32_t)src, w, h, RDP_AUTO_PITCH, RDP_AUTO_TMEM_SLOT(rdp_tex_slot), RDP_AUTO_PITCH),
+		MRdpLoadTex4bpp(0, (uint32_t)src, 16, 16, RDP_AUTO_PITCH, RDP_AUTO_TMEM_SLOT(rdp_tex_slot), RDP_AUTO_PITCH),
 
 		// Configure the tile descriptor for drawing this sprite (texture+palette)
 		RdpSyncTile(),
-		MRdpSetTile4bpp(1, RDP_AUTO_TMEM_SLOT(rdp_tex_slot), RDP_AUTO_PITCH, RDP_AUTO_TMEM_SLOT(pal_slot), w, h)
+		MRdpSetTile4bpp(1, RDP_AUTO_TMEM_SLOT(rdp_tex_slot), RDP_AUTO_PITCH, RDP_AUTO_TMEM_SLOT(pal_slot), 16, 16)
 	);
 
 	if (++rdp_tex_slot==8) rdp_tex_slot = 0;
@@ -80,16 +80,15 @@ static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int s
 	// clipping, flipping or scaling. For Y clipping we workaround it, but
 	// anything else must fallback to RDP 1 Cycle mode.
 	//
-	if (flipx || flipy || x0 < 0 || (x0+w)>320) {
+	if (flipx || flipy || x0 < 0 || (x0+sw)>320 || sw != 16 || sh != 16) {
 		int s0 = 0, t0 = 0;
-		int ds = 1, dt = 1;
-		int sw = w, sh = h;
+		int ds = scale_fx[sw], dt = scale_fx[sh];
 
 		if (x0 < 0) { s0 = -x0; sw -= s0; x0 = 0; }
 		if (y0 < 0) { t0 = -y0; sh -= t0; y0 = 0; }
 
-		if (flipx) { s0 = w-s0; ds = -ds; }
-		if (flipy) { t0 = h-t0; dt = -dt; }
+		if (flipx) { s0 = 16-s0; ds = -ds; }
+		if (flipy) { t0 = 16-t0; dt = -dt; }
 
 		if (rdp_mode_copy) {
 			rdl_push(dl,
@@ -101,12 +100,12 @@ static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int s
 
 		rdl_push(dl,
 			RdpTextureRectangle1I(1, x0, y0, x0+sw, y0+sh),
-		    RdpTextureRectangle2I(s0, t0, ds, dt)
+		    RdpTextureRectangle2FX(s0<<5, t0<<5, ds, dt)
 		);
 	} else {
 		int s0 = 0, t0 = 0;
 		int ds = 4, dt = 1;   // in copy mode, delta-s = 4 as RDP is blitting 4 pixels per cycle
-		int sw = w, sh = h;
+		int sw = 16, sh = 16;
 
 		if (y0 < 0) { t0 = -y0; sh -= t0; y0 = 0; }
 		if (y0+sh > 224) { sh -= y0+sh-224; }
