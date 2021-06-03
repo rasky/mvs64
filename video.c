@@ -134,7 +134,7 @@ static void render_sprites(void) {
 					// the last line of tile #15, while the bottom half overfill
 					// should be filled with the first line of tile #16. This
 					// is currently not implemented.
-					y = sh - y;
+					y = 32*16 - y;
 				}
 			}
 
@@ -163,7 +163,7 @@ static void render_sprites(void) {
 						tnum |= (tc << 12) & 0xF0000;
 						int palnum = ((tc >> 8) & 0xFF);
 
-						// debugf("[VIDEO]   top: nt:%d y:%d ssy:%d ssh:%d tnum:%x\n", nt, y, ssy, ssh, tnum);
+						// debugf("[VIDEO]   %s: nt:%d y:%d ssy:%d ssh:%d tnum:%x\n", half?"bot":"top", nt, y, ssy, ssh, tnum);
 
 						// Auto animation
 						if (aa_enabled) {
