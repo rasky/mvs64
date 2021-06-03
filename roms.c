@@ -139,7 +139,7 @@ void crom_set_bank(int bank) {
 	crom_mask = len;
 }
 
-static void rom(const char *dir, const char* name, int off, int sz, uint8_t *buf, bool bswap) {
+static void rom(const char *dir, const char* name, int off, int sz, uint8_t *buf, int bufsize, bool bswap) {
 	char fullname[1024];
 	strlcpy(fullname, dir, sizeof(fullname));
 	strlcat(fullname, name, sizeof(fullname));
@@ -150,6 +150,7 @@ static void rom(const char *dir, const char* name, int off, int sz, uint8_t *buf
 		fseek(f, 0, SEEK_END);
 		sz = ftell(f);
 	}
+	assertf(sz <= bufsize, "ROM too big: %s", name);
 	fseek(f, off, SEEK_SET);
 	int read = fread(buf, 1, sz, f);
 	fclose(f);
@@ -186,8 +187,8 @@ void rom_next_frame(void) {
 }
 
 void rom_load(const char *dir) {
-	rom(dir, "p.bios", 0, 0, BIOS, false);
-	rom(dir, "p.rom", 0, 0, P_ROM, false);
+	rom(dir, "p.bios", 0, 0, BIOS, sizeof(BIOS), false);
+	rom(dir, "p.rom", 0, 0, P_ROM, sizeof(P_ROM), false);
 
 	char ini[1024];
 	strcpy(ini, dir);
