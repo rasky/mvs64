@@ -13,7 +13,8 @@
 
 enum GameId {
 	GAME_MSLUG = 0x0201, GAME_SAMSHO = 0x0045, GAME_SENGOKU3 = 0x0261,
-	GAME_S1945P = 0x0254, GAME_AOF = 0x0044, GAME_AOF3 = 0x0096
+	GAME_S1945P = 0x0254, GAME_AOF = 0x0044, GAME_AOF3 = 0x0096,
+	GAME_PBOBBLEN = 0x0083
 };
 
 extern const char* game_ini[65536];
@@ -453,4 +454,5 @@ const char* game_ini[65536] = {
 	[GAME_SAMSHO]   = "idle_skip=0xF7E\n",
 	[GAME_AOF]      = "idle_skip=0x6790\n",
 	[GAME_AOF3]     = "idle_skip=0x15D2\n",
+	[GAME_PBOBBLEN] = "idle_skip=0xE76\n",
 };
