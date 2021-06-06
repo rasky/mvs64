@@ -9,12 +9,15 @@
 
 mvs_tlbhandler:
 	# Check whether the faulting address is in one of these ranges:
+	#  * 0x2nnnnn: PBROM area (banked)
 	#  * 0x3nnnnn: hardware register of MVS
 	#  * 0x4nnnnn: palette RAM (go through handlers for conversion to RGB32)
 	mfc0 k1, C0_BADVADDR
 	nop
 	srl k0, k1, 20
-	addi k0, -3
+	addi k0, -2
+	beqz k0, tlb_start
+	addi k0, -1
 	beqz k0, tlb_start
 	addi k0, -1
 	beqz k0, tlb_start
@@ -36,7 +39,7 @@ tlb_start:
 
 tlbcallhandler:
 	# Save all caller-saved registers
-	addi sp, -24*8
+	addi sp, -26*8
 	# Keep slots 0-3 empty as argument slots for function calls.
 	# This is required by MIPS ABI even if we only call functions
 	# that receive arguments in registers.
@@ -67,6 +70,11 @@ tlbcallhandler:
 	mfc0 t1, C0_SR
 	nop
 	sd t1, 23*8(sp)
+
+	mflo t0
+	mfhi t1
+	sd t0, 24*8(sp)
+	sd t1, 25*8(sp)
 
 	# Disable FPU & EXL. To speed up TLB handler, we don't save
 	# FPU registers context, so we expect memory handlers not to
@@ -129,7 +137,14 @@ tlb_readhwio:
 	srl t0, a0, 20
 	beq t0, 4, tlb_readhwio_palette
 	nop
+	beq t0, 3, tlb_readhwio_hwio
+	nop
 
+	la ra, tlb_readhwio_epilog
+	j read_pbrom
+	nop
+
+tlb_readhwio_hwio:
 	la ra, tlb_readhwio_epilog
 	j read_hwio
 	nop
@@ -314,7 +329,14 @@ tlb_writehwio_do:
 	srl t0, a0, 20
 	beq t0, 4, tlb_writehwio_palette
 	nop
+	beq t0, 3, tlb_writehwio_hwio
+	nop
 
+	la ra, tlb_restore
+	j write_pbrom
+	nop
+
+tlb_writehwio_hwio:
 	la ra, tlb_restore
 	j write_hwio
 	nop
@@ -337,6 +359,11 @@ tlb_restore:
 	mtc0 t0, C0_SR
 	mtc0 t1, C0_EPC
 
+	ld t0, 24*8(sp)
+	ld t1, 25*8(sp)
+	mtlo t0
+	mthi t1
+
 	.set noat    # no more assembly macros from now on
 	ld $1, 4*8(sp)
 	ld $2, 5*8(sp)
@@ -356,7 +383,7 @@ tlb_restore:
 	ld $24, 19*8(sp)
 	ld $25, 20*8(sp)
 	ld $31, 21*8(sp)
-	addi sp, 24*8
+	addiu sp, 26*8
 
 tlbdone:
 	# If the exception did not happen in the delay slot, we can simply

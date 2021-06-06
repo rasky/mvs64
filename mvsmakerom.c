@@ -7,12 +7,13 @@
 #include <sys/stat.h> // mkdir
 #include "miniz.h"
 
+#define MIN(a,b) ((a)<(b)?(a):(b))
 #define panic(s, ...) ({ fprintf(stderr, s, ##__VA_ARGS__); exit(1); })
 #define strstartwith(s, prefix) !strncmp(s, prefix, strlen(prefix))
 
 enum GameId {
 	GAME_MSLUG = 0x0201, GAME_SAMSHO = 0x0045, GAME_SENGOKU3 = 0x0261,
-	GAME_S1945P = 0x0254
+	GAME_S1945P = 0x0254, GAME_AOF = 0x0044, GAME_AOF3 = 0x0096
 };
 
 extern const char* game_ini[65536];
@@ -418,7 +419,12 @@ int main(int argc, char *argv[]) {
 	int off = strlen(outfn)-5;
 
 	outfn[off] = 'p';
-	saveto(game.PROM, game.prom_size, outfn);
+	saveto(game.PROM, MIN(game.prom_size, 1024*1024), outfn);
+
+	if (game.prom_size > 1024*1024) {
+		outfn[off] = 'b';
+		saveto(game.PROM+1024*1024, game.prom_size-1024*1024, outfn);		
+	}
 
 	outfn[off] = 'c';
 	saveto(game.CROM, game.crom_size, outfn);
@@ -445,4 +451,6 @@ int main(int argc, char *argv[]) {
 const char* game_ini[65536] = {
 	[GAME_MSLUG]    = "idle_skip=0x1FE2\n",
 	[GAME_SAMSHO]   = "idle_skip=0xF7E\n",
+	[GAME_AOF]      = "idle_skip=0x6790\n",
+	[GAME_AOF3]     = "idle_skip=0x15D2\n",
 };

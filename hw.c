@@ -53,15 +53,38 @@ static void write_unk(uint32_t addr, uint32_t val, int sz) {
 	debugf("[MEM] unknown write%d: %06x <- %0*x\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val);
 }
 
-static void write_bankswitch(uint32_t addr, uint32_t val, int sz) {
+static int pbrom_bank = 0;
+
+void write_pbrom(uint32_t addr, uint32_t val, int sz) {
 	if (addr >= 0x2FFFF0 && addr <= 0x2FFFFF) {
 		val &= 7;
-		debugf("[CART] bankswitch %x <= %x\n", (unsigned int)addr, (unsigned int)val);
-		banks[0x2].mem = P_ROM + (val+1)*0x100000;
+		pbrom_bank = val << 20;
+
+		// If the PBROM area linearly mapped, update the mapping.
+		if (banks[0x2].mem)
+			banks[0x2].mem = pbrom_linear() + val*0x100000;
+		// debugf("[CART] bankswitch %x <= %x\n", (unsigned int)addr, (unsigned int)pbrom_bank);
 		return;
 	}
 
 	debugf("[CART] unknown write%d: %06x <- %0*x (PC:%08x)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, m68k_get_reg(NULL, M68K_REG_PC));
+}
+
+uint32_t read_pbrom(uint32_t addr, int sz) {
+	// Most (all?) games seem to keep the bank number at 0x2fffef,
+	// and they check for it after switching banks (in a loop, maybe
+	// to wait until the bank is effectively mapped).
+	// Since games often uselessly bankswitch and they only access
+	// this location, we shortcircuit it to avoid loading that banks
+	// uselessly everytime.
+	// FIXME: check if we really need this
+	// FIXME: see if we can detect when this is false, to avoid bugs
+	if (addr == 0x2fffef && sz == 1) return pbrom_bank >> 20;
+
+	uint8_t *rom = pbrom_cache_lookup(pbrom_bank | (addr & 0x0FFFFF));
+	if (sz == 4) return BE32(*(u_uint32_t*)rom);
+	if (sz == 2) return BE16(*(uint16_t*)rom);
+	return *rom;
 }
 
 uint32_t read_hwio(uint32_t addr, int sz)  {
@@ -111,13 +134,6 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 		write_hwio(addr+2, val&0xFFFF, 2);
 		return;
 	}
-
-	// if (addr != 0x3C0002 && addr != 0x3C0000)
-	// if (sz == 1) val &= 0xFF;
-	// if (sz == 2) val &= 0xFFFF;
-	// if (addr != 0x300001)
-	// debugf("[HWIO] write%d: %06x <- %0*x (68K PC:%x)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, m68k_get_reg(NULL, M68K_REG_PC));
-	// debugf("[HWIO] write%d: %06x <- %0*x (68K PC:%x EPC:%lx)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, m68k_get_reg(NULL, M68K_REG_PC), C0_READ_EPC());
 
 	if ((addr>>16) == 0x30) switch (addr&0xFFFF) {
 		case 0x01: watchdog_kick(); return;
@@ -324,13 +340,18 @@ void tlb_map_area(unsigned int idx, uint32_t virt, uint32_t vmask, void* phys, b
 
 
 void hw_init(void) {
+	uint8_t *PB_ROM = pbrom_linear();
+
 	memset(banks, 0, sizeof(banks));
 	memcpy(P_ROM_VECTOR, P_ROM, sizeof(P_ROM_VECTOR));
 	PALETTE_RAM_BANK = 0x0000;
 
 	banks[0x0] = (Bank){ P_ROM+0x000000,   0xFFFFF,   NULL,            write_unk };
 	banks[0x1] = (Bank){ WORK_RAM,         0x0FFFF,   NULL,            NULL };
-	banks[0x2] = (Bank){ P_ROM+0x100000,   0xFFFFF,   NULL,            write_bankswitch };
+	if (PB_ROM)
+		banks[0x2] = (Bank){ PB_ROM,       0xFFFFF,   NULL,            write_pbrom };
+	else
+		banks[0x2] = (Bank){ NULL,         0xFFFFF,   read_pbrom,      write_pbrom };
 	banks[0x3] = (Bank){ NULL,             0x00000,   read_hwio,       write_hwio };
 	banks[0x4] = (Bank){ NULL,             0x00000,   video_palette_r, video_palette_w };
 	banks[0xC] = (Bank){ BIOS,             0x1FFFF,   NULL,            write_unk };
@@ -341,8 +362,10 @@ void hw_init(void) {
 	tlb_init();
 	tlb_map_area(0, 0x000000, 0x7FFFF, P_ROM+0x000000, false);
 	tlb_map_area(1, 0x080000, 0x7FFFF, P_ROM+0x080000, false);
-	tlb_map_area(2, 0x200000, 0x7FFFF, P_ROM+0x100000, false);
-	tlb_map_area(3, 0x280000, 0x7FFFF, P_ROM+0x180000, false);
+	if (PB_ROM) {
+		tlb_map_area(2, 0x200000, 0x7FFFF, PB_ROM+0x000000, false);
+		tlb_map_area(3, 0x280000, 0x7FFFF, PB_ROM+0x080000, false);		
+	}
 	tlb_map_area(4, 0xC00000, 0x1FFFF, BIOS, false);
 
 	tlb_map_area(8, 0x100000, 0x0FFFF, WORK_RAM, true);
