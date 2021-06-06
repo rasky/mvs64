@@ -52,6 +52,21 @@
 #include <stdbool.h>
 #include "assert.h"
 
+#ifndef __LIBDRAGON_DEBUG_H
+	#include <assert.h>
+	#include <stdio.h>
+
+	#define debugf(msg, ...) fprintf(stderr, msg, ##__VA_ARGS__)
+
+	#define assertf(cond, msg, ...) ({ \
+		if (!(cond)) { \
+			fprintf(stderr, "ASSERTION FAILED:\n"); \
+			fprintf(stderr, msg "\n", ##__VA_ARGS__); \
+			assert(cond); \
+		} \
+	})
+#endif
+
 // A RDP display list. This is a linear container of RDP primitives that can be
 // sent to RDP for asynchronous execution.
 // 
