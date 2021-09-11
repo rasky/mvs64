@@ -18,7 +18,7 @@
 // When compiling C/C++ code, 64-bit immediate operands require explicit
 // casting to a 64-bit type
 #ifdef __ASSEMBLER__
-#define cast64(x) x
+#define cast64(x) (x)
 #else
 #include <stdint.h>
 #define cast64(x) (uint64_t)(x)
@@ -35,11 +35,16 @@
 #define RdpSetTile(fmt, size, line, addr, tidx) \
     ((cast64(0x35)<<56) | (cast64((fmt)) << 53) | (cast64((size)) << 51) | (cast64((line)) << 41) | (cast64((addr)) << 32) | ((tidx) << 24))
 
-#define RdpSetTexImage(fmt, size, addr, width) \
-    ({ \
-        assertf(size != RDP_TILE_SIZE_4BIT, "RdpSetTexImage cannot be called with RDP_TILE_SIZE_4BIT"); \
-        ((cast64(0x3D)<<56) | ((addr) & 0x3FFFFF) | (cast64(((width))-1)<<32) | (cast64((fmt))<<53) | (cast64((size))<<51)); \
-    })
+#ifndef __ASSEMBLER__
+    #define RdpSetTexImage(fmt, size, addr, width) \
+        ({ \
+            assertf(size != RDP_TILE_SIZE_4BIT, "RdpSetTexImage cannot be called with RDP_TILE_SIZE_4BIT"); \
+            ((cast64(0x3D)<<56) | ((addr) & 0x3FFFFF) | (cast64(((width))-1)<<32) | (cast64((fmt))<<53) | (cast64((size))<<51)); \
+        })
+#else
+    #define RdpSetTexImage(fmt, size, addr, width) \
+        ((cast64(0x3D)<<56) | ((addr) & 0x3FFFFF) | (cast64(((width))-1)<<32) | (cast64((fmt))<<53) | (cast64((size))<<51))
+#endif
 
 #define RdpLoadTileFX(tidx,s0,t0,s1,t1) \
     ((cast64(0x34)<<56) | (cast64((tidx))<<24) | (cast64((s0))<<44) | (cast64((t0))<<32) | ((s1)<<12) | ((t1)<<0))
@@ -258,10 +263,17 @@
  *       sizes, RDP_AUTO_TMEM_SLOT cannot be used, and TMEM addresses must
  *       be calculated manually.
  */
-#define MRdpLoadTex4bpp(tidx, rdram_addr, width, height, pitch, tmem_addr, tmem_pitch) \
-    RdpSetTile(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_8BIT, (tmem_pitch) < 0 ? (width)/8 : tmem_pitch/8, (tmem_addr) < 0 ? -(tmem_addr) * (width)*(height)/2/8 : tmem_addr, tidx), \
-    RdpSetTexImage(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_8BIT, rdram_addr, (pitch) < 0 ? (width)/2 : (pitch)), \
-    RdpLoadTileI(tidx, 0, 0, (width)/2, (height))
+#ifndef __ASSEMBLER__
+    #define MRdpLoadTex4bpp(tidx, rdram_addr, width, height, pitch, tmem_addr, tmem_pitch) \
+        RdpSetTile(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_8BIT, (tmem_pitch) < 0 ? (width)/8 : tmem_pitch/8, (tmem_addr) < 0 ? -(tmem_addr) * (width)*(height)/2/8 : tmem_addr, tidx), \
+        RdpSetTexImage(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_8BIT, rdram_addr, (pitch) < 0 ? (width)/2 : (pitch)), \
+        RdpLoadTileI(tidx, 0, 0, (width)/2, (height))
+#else
+    #define MRdpLoadTex4bpp_Slot_Autopitch(tidx, rdram_addr, width, height, tmem_addr) \
+        RdpSetTile(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_8BIT, (width)/8, -(tmem_addr) * (width)*(height)/2/8, tidx), \
+        RdpSetTexImage(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_8BIT, rdram_addr, (width)/2), \
+        RdpLoadTileI(tidx, 0, 0, (width)/2, (height))
+#endif
 
 /**
  * MRdpLoadPalette16 - Display list for loading a 16-color palette into TMEM
@@ -276,10 +288,21 @@
  * RDRDP_NUM_SLOTS_PALETTE16 (16).
  *
  */
-#define MRdpLoadPalette16(tidx, rdram_addr, tmem_addr) \
-    RdpSetTile(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_4BIT, 16, ((tmem_addr) <= 0 ? (0x800 + -(tmem_addr)*(16*2*4)) : tmem_addr)/8, tidx), \
-    RdpSetTexImage(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_16BIT, rdram_addr, 16), \
-    RdpLoadTlut(tidx, 0, 15)
+#ifndef __ASSEMBLER__
+    #define MRdpLoadPalette16(tidx, rdram_addr, tmem_addr) \
+        RdpSetTile(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_4BIT, 16, ((tmem_addr) <= 0 ? (0x800 + -(tmem_addr)*(16*2*4)) : tmem_addr)/8, tidx), \
+        RdpSetTexImage(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_16BIT, rdram_addr, 16), \
+        RdpLoadTlut(tidx, 0, 15)
+#else
+    #define MRdpLoadPalette16_Addr(tidx, rdram_addr, tmem_addr) \
+        RdpSetTile(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_4BIT, 16, tmem_addr/8, tidx), \
+        RdpSetTexImage(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_16BIT, rdram_addr, 16), \
+        RdpLoadTlut(tidx, 0, 15)
+    #define MRdpLoadPalette16_Slot(tidx, rdram_addr, slot) \
+        RdpSetTile(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_4BIT, 16, (0x800 + -(slot)*(16*2*4))/8, tidx), \
+        RdpSetTexImage(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_16BIT, rdram_addr, 16), \
+        RdpLoadTlut(tidx, 0, 15)
+#endif
 
 
 /**
@@ -298,12 +321,21 @@
  * @note You can load TMEM using MRdpLoadTile4bpp and MRdpLoadPalette16.
  */
 
-#define MRdpSetTile4bpp(tidx, tmem_tex_addr, tmem_tex_pitch, tmem_pal_addr, width, height) \
-    RdpSetTile(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_4BIT, \
-        (tmem_tex_pitch) < 0 ? (width)/8 : tmem_tex_pitch, \
-        (tmem_tex_addr) < 0 ? -(tmem_tex_addr) * (width)*(height)/2/8 : tmem_tex_addr, tidx) \
-        | (((tmem_pal_addr)<0 ? -(tmem_pal_addr) : ((tmem_pal_addr)&0x780)>>7) << 20), \
-    RdpSetTileSizeI(tidx, 0, 0, (width)-1, (height)-1)
+#ifndef __ASSEMBLER__
+    #define MRdpSetTile4bpp(tidx, tmem_tex_addr, tmem_tex_pitch, tmem_pal_addr, width, height) \
+        RdpSetTile(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_4BIT, \
+            (tmem_tex_pitch) < 0 ? (width)/8 : tmem_tex_pitch, \
+            (tmem_tex_addr) < 0 ? -(tmem_tex_addr) * (width)*(height)/2/8 : tmem_tex_addr, tidx) \
+            | (((tmem_pal_addr)<0 ? -(tmem_pal_addr) : ((tmem_pal_addr)&0x780)>>7) << 20), \
+        RdpSetTileSizeI(tidx, 0, 0, (width)-1, (height)-1)
+#else
+    #define MRdpSetTile4bpp_Slot_Autopitch(tidx, tmem_tex_addr, tmem_pal_addr, width, height) \
+        RdpSetTile(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_4BIT, \
+            (width)/8, \
+            -(tmem_tex_addr) * (width)*(height)/2/8, tidx) \
+            | ((-(tmem_pal_addr)) << 20), \
+        RdpSetTileSizeI(tidx, 0, 0, (width)-1, (height)-1)
+#endif
 
 /**
  * MRdpDrawRect4bpp - Display list for drawing a 4bpp textured rectangle
@@ -319,5 +351,6 @@
 #define MRdpTextureRectangle4bpp(tidx, x, y, w, h) \
     RdpTextureRectangle1I(tidx, x, y, (x)+(w)-1, (y)+(h)-1), \
     RdpTextureRectangle2I(0, 0, 4, 1)
+
 
 #endif
