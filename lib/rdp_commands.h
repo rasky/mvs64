@@ -12,8 +12,8 @@
 #define RDP_TILE_SIZE_16BIT 2
 #define RDP_TILE_SIZE_32BIT 3
 
-#define RDP_COLOR16(r,g,b,a) (((r)<<11)|((g)<<6)|((b)<<1)|(a))
-#define RDP_COLOR32(r,g,b,a) (((r)<<24)|((g)<<16)|((b)<<8)|(a))
+#define RDP_COLOR16(r,g,b,a) (uint32_t)(((r)<<11)|((g)<<6)|((b)<<1)|(a))
+#define RDP_COLOR32(r,g,b,a) (uint32_t)(((r)<<24)|((g)<<16)|((b)<<8)|(a))
 
 // When compiling C/C++ code, 64-bit immediate operands require explicit
 // casting to a 64-bit type
@@ -86,6 +86,12 @@
 #define RdpSetFillColor(color) \
     (((cast64(0x37))<<56) | (color))
 
+#define RdpSetPrimColor(color) \
+    (((cast64(0x3a))<<56) | (color))
+
+#define RdpSetEnvColor(color) \
+    (((cast64(0x3b))<<56) | (color))
+
 #define RdpSetBlendColor(color) \
     (((cast64(0x39))<<56) | (color))
 
@@ -103,79 +109,79 @@
 #define _ORBITS_MULTI2(N, ...) _ORBITS_MULTI3(N, __VA_ARGS__)
 #define _ORBITS_MULTI(...)  _ORBITS_MULTI2(NUM_ARGS(__VA_ARGS__), __VA_ARGS__)
 
-#define COMB_RGB_SUBA_COMBINED  0
-#define COMB_RGB_SUBA_TEX0      1
-#define COMB_RGB_SUBA_TEX1      2
-#define COMB_RGB_SUBA_PRIM      3
-#define COMB_RGB_SUBA_SHADE     4
-#define COMB_RGB_SUBA_ENV       5
-#define COMB_RGB_SUBA_ONE       6
-#define COMB_RGB_SUBA_NOISE     7
-#define COMB_RGB_SUBA_ZERO      8
+#define COMB_RGB_SUBA_COMBINED  cast64(0)
+#define COMB_RGB_SUBA_TEX0      cast64(1)
+#define COMB_RGB_SUBA_TEX1      cast64(2)
+#define COMB_RGB_SUBA_PRIM      cast64(3)
+#define COMB_RGB_SUBA_SHADE     cast64(4)
+#define COMB_RGB_SUBA_ENV       cast64(5)
+#define COMB_RGB_SUBA_ONE       cast64(6)
+#define COMB_RGB_SUBA_NOISE     cast64(7)
+#define COMB_RGB_SUBA_ZERO      cast64(8)
 
-#define COMB_RGB_SUBB_COMBINED  0
-#define COMB_RGB_SUBB_TEX0      1
-#define COMB_RGB_SUBB_TEX1      2
-#define COMB_RGB_SUBB_PRIM      3
-#define COMB_RGB_SUBB_SHADE     4
-#define COMB_RGB_SUBB_ENV       5
-#define COMB_RGB_SUBB_KEYCENTER 6
-#define COMB_RGB_SUBB_K4        7
-#define COMB_RGB_SUBB_ZERO      8
+#define COMB_RGB_SUBB_COMBINED  cast64(0)
+#define COMB_RGB_SUBB_TEX0      cast64(1)
+#define COMB_RGB_SUBB_TEX1      cast64(2)
+#define COMB_RGB_SUBB_PRIM      cast64(3)
+#define COMB_RGB_SUBB_SHADE     cast64(4)
+#define COMB_RGB_SUBB_ENV       cast64(5)
+#define COMB_RGB_SUBB_KEYCENTER cast64(6)
+#define COMB_RGB_SUBB_K4        cast64(7)
+#define COMB_RGB_SUBB_ZERO      cast64(8)
 
-#define COMB_RGB_MUL_COMBINED       0
-#define COMB_RGB_MUL_TEX0           1
-#define COMB_RGB_MUL_TEX1           2
-#define COMB_RGB_MUL_PRIM           3
-#define COMB_RGB_MUL_SHADE          4
-#define COMB_RGB_MUL_ENV            5
-#define COMB_RGB_MUL_KEYSCALE       6
-#define COMB_RGB_MUL_COMBINED_ALPHA 7
-#define COMB_RGB_MUL_TEX0_ALPHA     8
-#define COMB_RGB_MUL_TEX1_ALPHA     9
-#define COMB_RGB_MUL_PRIM_ALPHA     10
-#define COMB_RGB_MUL_SHADE_ALPHA    11
-#define COMB_RGB_MUL_ENV_ALPHA      12
-#define COMB_RGB_MUL_LOD_FRAC       13
-#define COMB_RGB_MUL_PRIM_LOD_FRAC  14
-#define COMB_RGB_MUL_K5             15
-#define COMB_RGB_MUL_ZERO           16
+#define COMB_RGB_MUL_COMBINED       cast64(0)
+#define COMB_RGB_MUL_TEX0           cast64(1)
+#define COMB_RGB_MUL_TEX1           cast64(2)
+#define COMB_RGB_MUL_PRIM           cast64(3)
+#define COMB_RGB_MUL_SHADE          cast64(4)
+#define COMB_RGB_MUL_ENV            cast64(5)
+#define COMB_RGB_MUL_KEYSCALE       cast64(6)
+#define COMB_RGB_MUL_COMBINED_ALPHA cast64(7)
+#define COMB_RGB_MUL_TEX0_ALPHA     cast64(8)
+#define COMB_RGB_MUL_TEX1_ALPHA     cast64(9)
+#define COMB_RGB_MUL_PRIM_ALPHA     cast64(10)
+#define COMB_RGB_MUL_SHADE_ALPHA    cast64(11)
+#define COMB_RGB_MUL_ENV_ALPHA      cast64(12)
+#define COMB_RGB_MUL_LOD_FRAC       cast64(13)
+#define COMB_RGB_MUL_PRIM_LOD_FRAC  cast64(14)
+#define COMB_RGB_MUL_K5             cast64(15)
+#define COMB_RGB_MUL_ZERO           cast64(16)
 
-#define COMB_RGB_ADD_COMBINED  0
-#define COMB_RGB_ADD_TEX0      1
-#define COMB_RGB_ADD_TEX1      2
-#define COMB_RGB_ADD_PRIM      3
-#define COMB_RGB_ADD_SHADE     4
-#define COMB_RGB_ADD_ENV       5
-#define COMB_RGB_ADD_ONE       6
-#define COMB_RGB_ADD_ZERO      7
+#define COMB_RGB_ADD_COMBINED  cast64(0)
+#define COMB_RGB_ADD_TEX0      cast64(1)
+#define COMB_RGB_ADD_TEX1      cast64(2)
+#define COMB_RGB_ADD_PRIM      cast64(3)
+#define COMB_RGB_ADD_SHADE     cast64(4)
+#define COMB_RGB_ADD_ENV       cast64(5)
+#define COMB_RGB_ADD_ONE       cast64(6)
+#define COMB_RGB_ADD_ZERO      cast64(7)
 
-#define COMB_ALPHA_ADDSUB_COMBINED  0
-#define COMB_ALPHA_ADDSUB_TEX0      1
-#define COMB_ALPHA_ADDSUB_TEX1      2
-#define COMB_ALPHA_ADDSUB_PRIM      3
-#define COMB_ALPHA_ADDSUB_SHADE     4
-#define COMB_ALPHA_ADDSUB_ENV       5
-#define COMB_ALPHA_ADDSUB_ONE       6
-#define COMB_ALPHA_ADDSUB_ZERO      7
+#define COMB_ALPHA_ADDSUB_COMBINED  cast64(0)
+#define COMB_ALPHA_ADDSUB_TEX0      cast64(1)
+#define COMB_ALPHA_ADDSUB_TEX1      cast64(2)
+#define COMB_ALPHA_ADDSUB_PRIM      cast64(3)
+#define COMB_ALPHA_ADDSUB_SHADE     cast64(4)
+#define COMB_ALPHA_ADDSUB_ENV       cast64(5)
+#define COMB_ALPHA_ADDSUB_ONE       cast64(6)
+#define COMB_ALPHA_ADDSUB_ZERO      cast64(7)
 
-#define COMB_ALPHA_MUL_LOD_FRAC         0
-#define COMB_ALPHA_MUL_TEX0             1
-#define COMB_ALPHA_MUL_TEX1             2
-#define COMB_ALPHA_MUL_PRIM             3
-#define COMB_ALPHA_MUL_SHADE            4
-#define COMB_ALPHA_MUL_ENV              5
-#define COMB_ALPHA_MUL_PRIM_LOD_FRAC    6
-#define COMB_ALPHA_MUL_ZERO             7
+#define COMB_ALPHA_MUL_LOD_FRAC         cast64(0)
+#define COMB_ALPHA_MUL_TEX0             cast64(1)
+#define COMB_ALPHA_MUL_TEX1             cast64(2)
+#define COMB_ALPHA_MUL_PRIM             cast64(3)
+#define COMB_ALPHA_MUL_SHADE            cast64(4)
+#define COMB_ALPHA_MUL_ENV              cast64(5)
+#define COMB_ALPHA_MUL_PRIM_LOD_FRAC    cast64(6)
+#define COMB_ALPHA_MUL_ZERO             cast64(7)
 
 #define Comb0_Rgb(suba, subb, mul, add) \
-    (cast64((COMB_RGB_SUBA_ ## suba))<<52) | ((COMB_RGB_SUBB_ ## subb)<<28) | (cast64(COMB_RGB_MUL_ ## mul)<<47) | ((COMB_RGB_ADD_ ## add)<<15)
+    ((COMB_RGB_SUBA_ ## suba)<<52) | ((COMB_RGB_SUBB_ ## subb)<<28) | ((COMB_RGB_MUL_ ## mul)<<47) | ((COMB_RGB_ADD_ ## add)<<15)
 #define Comb1_Rgb(suba, subb, mul, add) \
-    (cast64((COMB_RGB_SUBA_ ## suba))<<37) | ((COMB_RGB_SUBB_ ## subb)<<24) | (cast64(COMB_RGB_MUL_ ## mul)<<32) | ((COMB_RGB_ADD_ ## add)<<6)
+    ((COMB_RGB_SUBA_ ## suba)<<37) | ((COMB_RGB_SUBB_ ## subb)<<24) | ((COMB_RGB_MUL_ ## mul)<<32) | ((COMB_RGB_ADD_ ## add)<<6)
 #define Comb0_Alpha(suba, subb, mul, add) \
-    (cast64((COMB_ALPHA_ADDSUB_ ## suba))<<44) | ((COMB_ALPHA_ADDSUB_ ## subb)<<12) | (cast64(COMB_ALPHA_MUL_ ## mul)<<41) | ((COMB_ALPHA_ADDSUB_ ## add)<<9)
+    ((COMB_ALPHA_ADDSUB_ ## suba)<<44) | ((COMB_ALPHA_ADDSUB_ ## subb)<<12) | ((COMB_ALPHA_MUL_ ## mul)<<41) | ((COMB_ALPHA_ADDSUB_ ## add)<<9)
 #define Comb1_Alpha(suba, subb, mul, add) \
-    (cast64((COMB_ALPHA_ADDSUB_ ## suba))<<21) | ((COMB_ALPHA_ADDSUB_ ## subb)<<3) | ((COMB_ALPHA_MUL_ ## mul)<<18) | ((COMB_ALPHA_ADDSUB_ ## add)<<0)
+    ((COMB_ALPHA_ADDSUB_ ## suba)<<21) | ((COMB_ALPHA_ADDSUB_ ## subb)<<3) | ((COMB_ALPHA_MUL_ ## mul)<<18) | ((COMB_ALPHA_ADDSUB_ ## add)<<0)
 
 // RDP command to configure the color combiner. Pass to this macro
 // up to 4 Comb* macros as arguments. For instance:
@@ -214,10 +220,19 @@
 #define SOM_ALPHADITHER_NOISE  ((cast64(2))<<36)
 #define SOM_ALPHADITHER_NONE   ((cast64(3))<<36)
 
-#define SOM_BLENDING           (1<<14)
-#define SOM_Z_WRITE            (1<<5)
-#define SOM_Z_COMPARE          (1<<4)
-#define SOM_ALPHA_COMPARE      (1<<0)
+#define SOM_BLENDING           ((cast64(1))<<14)
+#define SOM_Z_WRITE            ((cast64(1))<<5)
+#define SOM_Z_COMPARE          ((cast64(1))<<4)
+#define SOM_ALPHA_COMPARE      ((cast64(1))<<0)
+
+#define SOM_READ_ENABLE                 ((cast64(1)) << 6)
+#define SOM_AA_ENABLE                   ((cast64(1)) << 3)
+#define SOM_COVERAGE_DEST_CLAMP         ((cast64(0)) << 8)
+#define SOM_COVERAGE_DEST_WRAP          ((cast64(1)) << 8)
+#define SOM_COVERAGE_DEST_ZAP           ((cast64(2)) << 8)
+#define SOM_COVERAGE_DEST_SAVE          ((cast64(3)) << 8)
+#define SOM_COLOR_ON_COVERAGE           ((cast64(1)) << 7)
+
 
 #define RdpSetOtherModes(som_flags) \
     ((cast64(0x2f)<<56) | ((som_flags) ^ (cast64(6)<<41)))
