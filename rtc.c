@@ -43,7 +43,7 @@ static void rtc_stb_w(uint8_t x) {
 static uint8_t rtc_data_r(void) { return 1; }
 static uint8_t rtc_tp_r(void) { return reg_rtc_tp; }
 
-static void rtc_init(void) {
+static void rtc_init_(void) {
 	rtc_event_period = MVS_CLOCK;
 	rtc_event_id = emu_add_event(rtc_event_period/2, rtc_event_cb, NULL);
 }

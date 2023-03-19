@@ -7,7 +7,7 @@ endif
 
 BUILD_DIR = build/mvs64
 
-include n64rasky.mk
+include $(N64_INST)/include/n64.mk
 
 src = emu.c roms.c hw.c video.c m68kcpu.c m68kops.c platform_n64.c m68kdasm.c sprite_cache.c lib/rdl.c $(wildcard hle_*.c)
 rsp =
@@ -27,15 +27,15 @@ all: mvsmakerom mvs64-${ROMNAME}.z64
 test:
 	make -f Makefile.tests all
 
-mvs64-${ROMNAME}.dfs: $(ROM) mvsmakerom
+$(BUILD_DIR)/mvs64-${ROMNAME}.dfs: $(ROM) mvsmakerom
 	@echo "    [MVS] ${ROMDIR}"
 	./mvsmakerom $(BIOS) $(ROM)
 	@echo "    [DFS] $@"
-	$(N64_MKDFSPATH) $@ $(ROMDIR) >/dev/null
+	$(N64_MKDFS) $@ $(ROMDIR) >/dev/null
 
-mvs64-${ROMNAME}.z64: mvs64-${ROMNAME}.dfs
+mvs64-${ROMNAME}.z64: $(BUILD_DIR)/mvs64-${ROMNAME}.dfs
 mvs64-${ROMNAME}.z64: N64_ROM_TITLE="MVS64: ${ROMNAME}"
-mvs64-${ROMNAME}.elf: $(obj)
+$(BUILD_DIR)/mvs64-${ROMNAME}.elf: $(obj)
 
 mvsmakerom: $(obj_makerom)
 	@echo "    [LD] $@"

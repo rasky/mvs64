@@ -398,7 +398,7 @@ void hw_init(void) {
 
 	#endif
 
-	rtc_init();
+	rtc_init_();
 	watchdog_init();
 }
 

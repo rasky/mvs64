@@ -1,7 +1,7 @@
 #ifndef ROMS_H
 #define ROMS_H
 
-extern uint8_t P_ROM[];
+extern uint8_t *P_ROM;
 extern unsigned int rom_pc_idle_skip;
 
 void rom_load(const char *dir);

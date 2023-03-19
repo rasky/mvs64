@@ -5,11 +5,7 @@ uint8_t keystate[256];
 
 extern char end __attribute__((section (".data")));
 
-static int rdp_disp;
-
 void plat_init(int audiofreq, int fps) {
-	init_interrupts();
-
 #ifdef __LIBDRAGON_DEBUG_H
     debug_init_isviewer();
     debug_init_usblog();
@@ -26,7 +22,8 @@ void plat_init(int audiofreq, int fps) {
     // corrupted on NTSC consoles.
 	display_init(RESOLUTION_320x240, DEPTH_16_BPP, 2, GAMMA_NONE, ANTIALIAS_RESAMPLE);
     dfs_init(DFS_DEFAULT_LOCATION);
-    rdp_init();
+    rdpq_init();
+    // rdpq_debug_start();
 }
 
 int plat_poll(void) {
@@ -60,18 +57,15 @@ uint8_t *g_screen_ptr;
 int g_screen_pitch;
 
 void plat_beginframe(void) {
-    while(!(rdp_disp = display_lock())) {}
+    surface_t *rdp_disp = display_get();
 
-    extern void *__safe_buffer[];
-	g_screen_ptr = __safe_buffer[rdp_disp-1];
+	g_screen_ptr = rdp_disp->buffer;
 	g_screen_pitch = 320*2;
 
-    rdp_attach_display(rdp_disp);
-	rdp_set_clipping(0, 0, 320, 224);
+    rdpq_attach(rdp_disp, NULL);
+	rdpq_set_scissor(0, 0, 320, 224);
 }
 
 void plat_endframe(void) {
-	rdp_detach_display();
-	display_show(rdp_disp);
-	rdp_disp = 0;
+	rdpq_detach_show();
 }

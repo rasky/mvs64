@@ -9,13 +9,17 @@
 #include "sprite_cache.h"
 
 #ifdef N64
+#include <malloc.h>
 #define ALIGN_256K __attribute__((aligned(256*1024)))
 #else
+#define memalign(a, b) malloc(b)
 #define ALIGN_256K
 #endif
 
-uint8_t P_ROM[1*1024*1024] ALIGN_256K;
-uint8_t PB_ROM[1*1024*1024] ALIGN_256K;
+uint8_t *P_ROM;
+#define P_ROM_SIZE (1024*1024)
+uint8_t *PB_ROM;
+#define PB_ROM_SIZE  (1024*1024)
 
 // Address to trigger idle-skipping
 unsigned int rom_pc_idle_skip = 0;
@@ -192,13 +196,14 @@ typedef struct {
  	uint32_t bank2;
 } PBROMCacheEntry;
 
-_Static_assert(sizeof(PBROMCacheEntry)*(1<<PBROM_LOOKUP_BITS) <= sizeof(PB_ROM), "PBROM cache too big");
+_Static_assert(sizeof(PBROMCacheEntry)*(1<<PBROM_LOOKUP_BITS) <= PB_ROM_SIZE, "PBROM cache too big");
 
 static bool pbrom_is_linear = false;
 static uint32_t pbrom_last_bank = 0xFFFFFFFF;
 static uint8_t *pbrom_last_mem = NULL;
 
 void pbrom_init(const char *fn) {
+	PB_ROM = memalign(256*1024, PB_ROM_SIZE);
 	unsigned len;
 	#ifdef N64
 	if (pbrom_file != -1) dfs_close(pbrom_file);
@@ -220,7 +225,7 @@ void pbrom_init(const char *fn) {
 	fseek(pbrom_file, 0, SEEK_SET);
 	#endif
 
-	if (len > sizeof(PB_ROM)) {
+	if (len > PB_ROM_SIZE) {
 		pbrom_is_linear = false;
 		return;
 	}
@@ -346,8 +351,9 @@ void rom_next_frame(void) {
 }
 
 void rom_load(const char *dir) {
+	P_ROM = memalign(256*1024, 1024*1024);
 	rom(dir, "p.bios", 0, 0, BIOS, sizeof(BIOS), false);
-	rom(dir, "p.rom", 0, 0, P_ROM, sizeof(P_ROM), false);
+	rom(dir, "p.rom", 0, 0, P_ROM, P_ROM_SIZE, false);
 
 	char ini[1024];
 	strcpy(ini, dir);

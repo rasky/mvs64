@@ -1,32 +1,12 @@
 
 #include <libdragon.h>
-#include "lib/rdl.h"
-
-#define NUM_DISPLAY_LISTS  3
-
-static RdpDisplayList *dls[NUM_DISPLAY_LISTS] = { NULL};
-static RdpDisplayList *dl;
 
 static bool rdp_mode_copy = false;
 static int rdp_tex_slot = 0;
 static int rdp_pal_slot = 0;
 static int fix_last_spritnum = 0;
+static int fix_last_palnum = -1;
 static int pal_slot_cache[16];
-
-static void dl_flush(bool force) {
-	if (force || rdl_nempty(dl) < 32) {
-		rdl_flush(dl);
-		rdl_exec(dl);
-
-		for (int i=0;i<NUM_DISPLAY_LISTS;i++) {
-			if (dl == dls[i]) {
-				dl = dls[i+1==NUM_DISPLAY_LISTS ? 0 : i+1];
-				break;
-			}
-		}
-		rdl_reset(dl);
-	}
-}
 
 static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int sh, bool flipx, bool flipy) {
 	static const int16_t scale_fx[17] = { 0, (16<<10)/1, (16<<10)/2, (16<<10)/3, (16<<10)/4, (16<<10)/5, (16<<10)/6, (16<<10)/7, (16<<10)/8, (16<<10)/9, (16<<10)/10, (16<<10)/11, (16<<10)/12, (16<<10)/13, (16<<10)/14, (16<<10)/15, (16<<10)/16 };
@@ -51,23 +31,17 @@ static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int s
 		pal_slot = rdp_pal_slot++;
 		if (rdp_pal_slot == 16) rdp_pal_slot = 0;
 
-		rdl_push(dl,
-			RdpSyncTile(),
-			MRdpLoadPalette16(2, (uint32_t)pal, RDP_AUTO_TMEM_SLOT(pal_slot))
-		);
-
+		rdpq_tex_load_tlut(pal, pal_slot*16, 16);
 		pal_slot_cache[pal_slot] = palnum;
 	}
 
-	rdl_push(dl,
-		// Load the sprite pixels into the current texture slot
-		RdpSyncTile(),
-		MRdpLoadTex4bpp(0, (uint32_t)src, 16, 16, RDP_AUTO_PITCH, RDP_AUTO_TMEM_SLOT(rdp_tex_slot), RDP_AUTO_PITCH),
-
-		// Configure the tile descriptor for drawing this sprite (texture+palette)
-		RdpSyncTile(),
-		MRdpSetTile4bpp(1, RDP_AUTO_TMEM_SLOT(rdp_tex_slot), RDP_AUTO_PITCH, RDP_AUTO_TMEM_SLOT(pal_slot), 16, 16)
-	);
+	const int pitch = 8;
+	const int tmem_addr = rdp_tex_slot * 16 * 8;
+	rdpq_set_texture_image_raw(0, PhysicalAddr(src), FMT_RGBA16, 16/4, 16);
+	rdpq_set_tile(TILE1, FMT_RGBA16, tmem_addr, 0, 0);
+	rdpq_set_tile(TILE0, FMT_CI4, tmem_addr, pitch, pal_slot);
+	rdpq_set_tile_size(TILE0, 0, 0, 16, 16);
+	rdpq_load_block(TILE1, 0, 0, 16*16/4, pitch);
 
 	if (++rdp_tex_slot==8) rdp_tex_slot = 0;
 
@@ -91,53 +65,37 @@ static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int s
 		if (flipy) { t0 = 16-t0; dt = -dt; }
 
 		if (rdp_mode_copy) {
-			rdl_push(dl,
-				RdpSyncPipe(),
-			    RdpSetOtherModes(SOM_CYCLE_1 | SOM_ALPHA_COMPARE | SOM_RGBDITHER_NONE | SOM_ALPHADITHER_NONE | SOM_ENABLE_TLUT_RGB16)
-			);
+			rdpq_set_mode_standard();
+			rdpq_mode_tlut(TLUT_RGBA16);
 			rdp_mode_copy = false;
 		}
 
-		rdl_push(dl,
-			RdpTextureRectangle1I(1, x0, y0, x0+sw, y0+sh),
-		    RdpTextureRectangle2FX(s0<<5, t0<<5, ds, dt)
-		);
+		rdpq_texture_rectangle_raw(
+			TILE0, x0, y0, x0+sw, y0+sh,
+			s0, t0, ds*(1.0f / 1024.f), dt*(1.0f / 1024.f));
 	} else {
 		int s0 = 0, t0 = 0;
-		int ds = 4, dt = 1;   // in copy mode, delta-s = 4 as RDP is blitting 4 pixels per cycle
+		int ds = 1, dt = 1;
 		int sw = 16, sh = 16;
 
 		if (y0 < 0) { t0 = -y0; sh -= t0; y0 = 0; }
 		if (y0+sh > 224) { sh -= y0+sh-224; }
 
 		if (!rdp_mode_copy) {
-			rdl_push(dl,
-				RdpSyncPipe(),
-			    RdpSetOtherModes(SOM_CYCLE_COPY | SOM_ALPHA_COMPARE | SOM_ENABLE_TLUT_RGB16)
-			);		
+			rdpq_set_mode_copy(true);
+			rdpq_mode_tlut(TLUT_RGBA16);
 			rdp_mode_copy = true;			
 		}
 
-		rdl_push(dl,
-		    RdpTextureRectangle1I(1, x0, y0, x0+sw-1, y0+sh-1),
-		    RdpTextureRectangle2I(s0, t0, ds, dt)
-		);
+		rdpq_texture_rectangle_raw(
+			TILE0, x0, y0, x0+sw, y0+sh,
+			s0, t0, ds, dt);
 	}
-
-	dl_flush(false);
 }
 
 static void render_begin_sprites(void) {
-	rdl_push(dl,
-		RdpSyncPipe(),
-		// By default, go into COPY mode which is used by most sprites
-		RdpSetOtherModes(SOM_CYCLE_COPY | SOM_ALPHA_COMPARE | SOM_ENABLE_TLUT_RGB16),
-		// Setup combiner for texture output without lighting. We need 1-cycle
-		// mode for sprites with scaling or flipping, so the combiner must be
-		// configured.
-		RdpSetCombine(Comb1_Rgb(ZERO, ZERO, ZERO, TEX0), Comb1_Alpha(ZERO, ZERO, ZERO, TEX0)),
-	    RdpSetBlendColor(0x0001) // alpha threshold value = 1
-	);
+	rdpq_set_mode_copy(true);
+	rdpq_mode_tlut(TLUT_RGBA16);
 
 	rdp_mode_copy = true;
 	rdp_pal_slot = 0;
@@ -145,6 +103,9 @@ static void render_begin_sprites(void) {
 }
 
 static void render_end_sprites(void) {}
+
+#define FIX_TMEM_ADDR 	0
+#define FIX_TMEM_PITCH  8
 
 static void draw_sprite_fix(int spritenum, int palnum, int x, int y) {
 	// HACK: most of the fix layer is normally empty. Unfortunately "empty"
@@ -156,61 +117,48 @@ static void draw_sprite_fix(int spritenum, int palnum, int x, int y) {
 		fix_last_spritnum = spritenum;
 
 		uint8_t *src = srom_get_sprite(spritenum);
-		rdl_push(dl,
-			RdpSyncTile(),
-			RdpSyncLoad(),
-			MRdpLoadTex4bpp(0, (uint32_t)src, 8, 8, RDP_AUTO_PITCH, RDP_AUTO_TMEM_SLOT(0), RDP_AUTO_PITCH)
-		);
+
+		// We can't use LOAD_BLOCK for a 8x8 CI4 sprite, because the TMEM
+		// pitch must be 8 bytes minimum.
+		rdpq_set_texture_image_raw(0, PhysicalAddr(src), FMT_CI8, 8/2, 8);
+		rdpq_load_tile(TILE1, 0, 0, 4, 8);
 	}
 
-	rdl_push(dl,
-		RdpSyncTile(),
-		MRdpSetTile4bpp(1, RDP_AUTO_TMEM_SLOT(0), RDP_AUTO_PITCH, RDP_AUTO_TMEM_SLOT(palnum), 8, 8),
-		MRdpTextureRectangle4bpp(1, x, y, 8, 8)
-	);
+	if (palnum != fix_last_palnum) {
+		fix_last_palnum = palnum;
+		rdpq_set_tile(TILE0, FMT_CI4, FIX_TMEM_ADDR, FIX_TMEM_PITCH, palnum);
+		rdpq_set_tile_size(TILE0, 0, 0, 8, 8);
+	}
 
-	dl_flush(false);
+	rdpq_texture_rectangle_raw(TILE0, x, y, x+8, y+8, 0, 0, 1, 1);
 }
 
 static void render_begin_fix(void) {
-	rdl_push(dl,
-		// Prepare for fix layer
-		RdpSyncPipe(),
-    	RdpSetOtherModes(SOM_CYCLE_COPY | SOM_ALPHA_COMPARE | SOM_ENABLE_TLUT_RGB16),
-	    RdpSetBlendColor(0x0001) // alpha threshold value = 1
-	);
+	rdpq_set_mode_copy(true);
+	rdpq_mode_tlut(TLUT_RGBA16);
 
 	// Load all 16 palettes right away. They fit TMEM, so that we don't need
 	// to load them while we process
 	data_cache_hit_writeback_invalidate(PALETTE_RAM + PALETTE_RAM_BANK, 16*16*2);
-	for (int i=0;i<16;i++) {		
-		rdl_push(dl, MRdpLoadPalette16(i&7, (uint32_t)(PALETTE_RAM + PALETTE_RAM_BANK + i*16), RDP_AUTO_TMEM_SLOT(i)));
-		if (i==7) rdl_push(dl, RdpSyncTile());
-		dl_flush(false);
-	}
-	    
-	dl_flush(false);
+	rdpq_tex_load_tlut(PALETTE_RAM + PALETTE_RAM_BANK, 0, 256);
+
+	// Configure tiles once
+	rdpq_set_tile(TILE0, FMT_CI4, FIX_TMEM_ADDR, FIX_TMEM_PITCH, 0);  // used for drawing
+	rdpq_set_tile(TILE1, FMT_CI8, FIX_TMEM_ADDR, FIX_TMEM_PITCH, 0);  // used for loading
+	rdpq_set_tile_size(TILE0, 0, 0, 8, 8);
+
 	fix_last_spritnum = -1;
+	fix_last_palnum = -1;
 }
 
 static void render_end_fix(void) {}
 
 static void render_begin(void) {
-	if (!dls[0]) {
-		for (int i=0;i<NUM_DISPLAY_LISTS;i++)
-			dls[i] = rdl_heap_alloc(512);
-	}
-	for (int i=0;i<NUM_DISPLAY_LISTS;i++)
-		rdl_reset(dls[i]);
-	dl = dls[0];
-
-	rdl_push(dl,
-		RdpSetOtherModes(SOM_CYCLE_FILL),
-		RdpSetFillColor16(PALETTE_RAM[PALETTE_RAM_BANK + 0xFFF]),
-		RdpFillRectangleI(0, 0, 320, 240)
-	);
+	// Clear the screen
+	rdpq_set_mode_fill(color_from_packed16(PALETTE_RAM[PALETTE_RAM_BANK + 0xFFF]));
+	rdpq_fill_rectangle(0, 0, 320, 240);
 }
 
 static void render_end(void) {
-	dl_flush(true);
+	rspq_flush();
 }
