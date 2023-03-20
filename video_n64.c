@@ -1,6 +1,10 @@
 
 #include <libdragon.h>
 
+#define RSP_FIX_LAYER    1
+
+extern uint32_t RSP_OVL_ID;
+
 static bool rdp_mode_copy = false;
 static int rdp_tex_slot = 0;
 static int rdp_pal_slot = 0;
@@ -105,10 +109,28 @@ static void render_begin_sprites(void) {
 
 static void render_end_sprites(void) {}
 
+static void rsp_fix_init(void) {
+	rspq_write(RSP_OVL_ID, 0x0);
+}
+static void rsp_fix_draw(uint8_t *src, int palnum, int x, int y) {
+	rspq_write(RSP_OVL_ID, 0x1, PhysicalAddr(src), 
+		(palnum << 20) | (x << 10) | y);
+}
+
 #define FIX_TMEM_ADDR 	0
 #define FIX_TMEM_PITCH  8
 
 static void draw_sprite_fix(int spritenum, int palnum, int x, int y) {
+	if (RSP_FIX_LAYER) {
+		uint8_t *src = NULL;
+		if (spritenum != fix_last_spritnum) {
+			fix_last_spritnum = spritenum;
+			src = srom_get_sprite(spritenum);
+		}
+		rsp_fix_draw(src, palnum, x, y);
+		return;
+	}
+
 	// HACK: most of the fix layer is normally empty. Unfortunately "empty"
 	// means a tile whose pixels are 0, which is something that might be
 	// expensive to check at runtime. So for now we skip at least TMEM loading
@@ -150,6 +172,9 @@ static void render_begin_fix(void) {
 
 	fix_last_spritnum = -1;
 	fix_last_palnum = -1;
+
+	if (RSP_FIX_LAYER)
+		rsp_fix_init();
 }
 
 static void render_end_fix(void) {}

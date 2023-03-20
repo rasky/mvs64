@@ -1,6 +1,10 @@
 #include "platform.h"
 #include <memory.h>
 
+uint32_t RSP_OVL_ID = 0;
+
+DEFINE_RSP_UCODE(rsp_video);
+
 uint8_t keystate[256];
 
 extern char end __attribute__((section (".data")));
@@ -24,6 +28,9 @@ void plat_init(int audiofreq, int fps) {
     dfs_init(DFS_DEFAULT_LOCATION);
     rdpq_init();
     // rdpq_debug_start();
+
+    // Register our custom RSP overlay into the RSP queue engine
+    RSP_OVL_ID = rspq_overlay_register(&rsp_video);
 }
 
 int plat_poll(void) {

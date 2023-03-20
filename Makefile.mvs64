@@ -10,9 +10,9 @@ BUILD_DIR = build/mvs64
 include $(N64_INST)/include/n64.mk
 
 src = emu.c roms.c hw.c video.c m68kcpu.c m68kops.c platform_n64.c m68kdasm.c sprite_cache.c lib/rdl.c $(wildcard hle_*.c)
-rsp =
+rsp = rsp_video.S
 asm = hw_n64.S
-obj = $(src:%.c=$(BUILD_DIR)/%.o) $(asm:%.S=$(BUILD_DIR)/%.o) $(rsp:%.S=$(BUILD_DIR)/%.text.o) $(rsp:%.S=$(BUILD_DIR)/%.data.o)
+obj = $(src:%.c=$(BUILD_DIR)/%.o) $(asm:%.S=$(BUILD_DIR)/%.o) $(rsp:%.S=$(BUILD_DIR)/%.o)
 
 src_makerom = mvsmakerom.c miniz.c
 obj_makerom = $(src_makerom:%.c=$(BUILD_DIR)/%.o)
