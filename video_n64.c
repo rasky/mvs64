@@ -67,6 +67,7 @@ static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int s
 		if (rdp_mode_copy) {
 			rdpq_set_mode_standard();
 			rdpq_mode_tlut(TLUT_RGBA16);
+			rdpq_mode_alphacompare(1);
 			rdp_mode_copy = false;
 		}
 
