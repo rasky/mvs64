@@ -34,11 +34,13 @@ static uint8_t m68k_ram_r8(uint32_t addr) {
     uint32_t page = addr & ~0xFFF;
     for (int i=0;i<16;i++) {
         if (ram_address[i] == page) {
+            return *(uint8_t*)addr;
             return ram_pages[i][addr & 0xFFF];
         }
         if (ram_address[i] == 0xFFFFFFFF) {
             ram_address[i] = page;
             memset(ram_pages[i], 0, 4096);
+            debugf("Mapping RAM page %d at %08lx\n", i, page);
             tlb_map_area(i, page, 0xFFF, ram_pages[i], true);
             return 0;
         }
@@ -91,12 +93,13 @@ void run_testsuite(const char *fn)
 
         uint32_t nl; fread(&nl, 1, 4, f);
         char *name = alloca(nl+1); fread(name, 1, nl, f); name[nl] = 0;
-        debugf("Running test: %s\n", name);
-
         uint32_t cycles; fread(&cycles, 1, 4, f);
         test_state_t initial, final;
         read_state(f, &initial);
         read_state(f, &final);
+
+        // if(t!=62-1) continue;
+        debugf("Running test: %s\n", name);
 
         // Run the test
         m64k_t m64k;
@@ -117,7 +120,6 @@ void run_testsuite(const char *fn)
             uint32_t addr = initial.ram[i][0];
             uint32_t value = initial.ram[i][1];
             m68k_ram_w8(addr, value);
-            debugf("RAM[%lx] = %02lx\n", addr, value);
         }
         // Make sure also locations mentioned in final state are mapped
         for (int i=0; i<final.nrams; i++)
@@ -134,7 +136,7 @@ void run_testsuite(const char *fn)
                 failed = true;
             }
             if (i<7 && m64k.aregs[i] != final.aregs[i])  {
-                debugf("A%d: %08lx != %08lx\n", i, m64k.dregs[i], final.dregs[i]);
+                debugf("A%d: %08lx != %08lx\n", i, m64k.aregs[i], final.aregs[i]);
                 failed = true;
             }
         }
@@ -149,6 +151,13 @@ void run_testsuite(const char *fn)
         if (m64k.sr != final.sr) {
             debugf("SR: %08lx != %08lx\n", m64k.sr, final.sr);
             failed = true;
+        }
+        for (int i=0; i<final.nrams; i++) {
+            uint8_t got = m68k_ram_r8(final.ram[i][0]);
+            if (got != final.ram[i][1]) {
+                debugf("RAM[%lx] = %02x != %02lx\n", final.ram[i][0], got, final.ram[i][1]);
+                failed = true;
+            }
         }
 
         if (failed) abort();

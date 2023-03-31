@@ -1,4 +1,5 @@
 #include "m64k.h"
+#include "cycles.h"
 #include <libdragon.h>
 #include <string.h>
 
@@ -14,6 +15,10 @@ void __m64k_assert_invalid_opcode(uint16_t opcode, uint32_t pc) {
     assertf(0, "Invalid opcode: %04x @ %08lx", opcode, pc);
 }
 
+void __m64k_assert_invalid_ea(uint16_t opcode, uint32_t pc) {
+    assertf(0, "Invalid EA: %04x @ %08lx", opcode, pc);
+}
+
 void m64k_init(m64k_t *m64k)
 {
     memset(m64k, 0, sizeof(*m64k));
@@ -24,7 +29,7 @@ void m64k_run(m64k_t *m64k, int64_t until)
 {
     memcpy(_m64k_dregs, m64k->dregs, sizeof(m64k->dregs));
     memcpy(_m64k_aregs, m64k->aregs, sizeof(m64k->aregs));
-    _m64k_aregs[7] = m64k->usp;
+    _m64k_aregs[7] = m64k->ssp;
     _m64k_pc = m64k->pc;
     _m64k_cycles = 1;
     _m64k_sr = m64k->sr;
@@ -33,7 +38,7 @@ void m64k_run(m64k_t *m64k, int64_t until)
 
     memcpy(m64k->dregs, _m64k_dregs, sizeof(m64k->dregs));
     memcpy(m64k->aregs, _m64k_aregs, sizeof(m64k->aregs));
-    m64k->usp = _m64k_aregs[7];
+    m64k->ssp = _m64k_aregs[7];
     m64k->pc = _m64k_pc;
     m64k->sr = _m64k_sr;
 }

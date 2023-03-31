@@ -5,8 +5,9 @@
     .set noreorder
 
 .macro jal_and_j func, label
+    lui ra, %hi(\label)
     j \func
-    li ra, %lo(\label)
+    addi ra, %lo(\label)
 .endm
 
 .macro zx64 dst, src
@@ -38,6 +39,7 @@
 _m64k_cycles: .long 0
 _m64k_pc:     .long 0
 _m64k_sr:     .long 0
+flag_x:       .byte 0
     .section .data
 _m64k_dregs:  .long 0,0,0,0,0,0,0,0
 _m64k_aregs:  .long 0,0,0,0,0,0,0,0
@@ -87,6 +89,10 @@ _m64k_asmrun:
     # Extract flags from SR into flag_nv / flag_zc
     lw t0,       _m64k_sr    # Format: ---X NZVC
 
+    srl t1, t0, 4          # X to bit 0
+    andi t1, 1
+    sb t1, flag_x
+
     sll t1, t0, 28         # N to bit 31 (and 63)
     dsll flag_nv, t0, 62   # V to bit 63 (and 0 to 31)
     xor flag_nv, t1       
@@ -127,8 +133,13 @@ main_loop_exit:
     andi t1, 1
     or t0, t1
     dsll t1, flag_zc, 32
-    sne t1, zero             # Z
+    seq t1, zero             # Z
     sll t1, 2
+    or t0, t1
+
+    lbu t1, flag_x           # X
+    sne t1, zero, t1
+    sll t1, 4
     or t0, t1
     
     lw t1, _m64k_sr
@@ -175,7 +186,7 @@ imm_16:
     jr ra
     addi m_cycles, -4
 imm_8:
-    addi dptr, m_pc, -3
+    addi dptr, m_pc, -2
     addi m_pc, 2
     li opsize, 1
     jr ra
@@ -207,48 +218,61 @@ ea_111: # Register-less EAs
     jr t1
     nop
 
+.macro decode_opsize
+    bnez opsize, 1f        # if opsize was not specified
+    srl opsize, opcode, 6  # extract it from opcode bit 6-7
+    andi opsize, 0x3
+    li t0, 1
+    sllv opsize, t0, opsize
+1:
+.endm
+
     .set reorder
 ea_000: # Dn
-    la eaptr, _m64k_dregs(t1)
+    decode_opsize
+    la eaptr, _m64k_dregs+4(t1)
+    sub eaptr, opsize
     jr ra
 ea_001: # An
-    la eaptr, _m64k_aregs(t1)
+    decode_opsize
+    la eaptr, _m64k_aregs+4(t1)
+    sub eaptr, opsize
     jr ra
 ea_010: # (An)
     lw eaptr, _m64k_aregs(t1)
+    map_m68k eaptr
     addi m_cycles, -4
     jr ra
 ea_011: # (An)+
     # FIXME: align sp byte access
     lw eaptr, _m64k_aregs(t1)
-    beqz opsize, 1f        # if opsize was not specified
-    srl opsize, opcode, 6  # extract it from opcode bit 6-7
-    andi opsize, 0x3
-    li t0, 1
-    sllv opsize, t0, opsize
-1:
+    decode_opsize
     add t0, eaptr, opsize
+    bne t1, 7*4, 1f   # if A7 (stack pointer), align to word
+    add t0, 1
+    and t0, ~1
+1:
     sw t0, _m64k_aregs(t1)
+    map_m68k eaptr
     addi m_cycles, -4
     jr ra
 ea_100: # -(An)
-    # FIXME: align sp byte access
     lw eaptr, _m64k_aregs(t1)
-    beqz opsize, 1f        # if opsize was not specified
-    srl opsize, opcode, 6  # extract it from opcode bit 6-7
-    andi opsize, 0x3
-    li t0, 1
-    sllv opsize, t0, opsize
-1:
+    decode_opsize
     sub eaptr, opsize
+    bne t1, 7*4, 1f    # if A7 (stack pointer), align to word
+    and eaptr, ~1
+1:
     sw eaptr, _m64k_aregs(t1)
+    map_m68k eaptr
     addi m_cycles, -6
     jr ra
 ea_101: # (d16,An)
     lw eaptr, _m64k_aregs(t1)
     lh t0, 0(m_pc)
     addi m_pc, 2
-    add eaptr, t0
+    addu eaptr, t0
+    map_m68k eaptr
     addi m_cycles, -8
     jr ra
 ea_110: # (d8,An,Xn)
@@ -257,42 +281,58 @@ ea_110_inner:
     lbu t1, 0(m_pc)  # read extension word
     lb t0, 1(m_pc)   # read 8-bit displacement
     addi m_pc, 2
-    add eaptr, t0
+    addu eaptr, t0
     srl t0, t1, 2       # calculate pointer to Xn
     andi t0, 0xF << 2
-    andi t2, t1, 0x800
-    lw t0, _m64k_dregs(t0)
+    andi t2, t1, 0x8
+    lw t1, _m64k_dregs(t0)
     bnez t2, 1f
-    lh t0, _m64k_dregs+2(t0)
+    lh t1, _m64k_dregs+2(t0)
 1:
-    add eaptr, t0
+    addu eaptr, t1
+    map_m68k eaptr
     addi m_cycles, -10
     jr ra
 ea7_000: # (xxx).W
     lh eaptr, 0(m_pc)
     addi m_pc, 2
+    map_m68k eaptr
     addi m_cycles, -8
     jr ra
 ea7_001: # (xxx).L
     lwl eaptr, 0(m_pc)
     lwr eaptr, 3(m_pc)
     addi m_pc, 4
+    map_m68k eaptr
     addi m_cycles, -12
     jr ra
 ea7_010: # (d16,PC)
-    addi eaptr, m_pc, -2
+    move eaptr, m_pc
     lh t0, 0(m_pc)
     addi m_pc, 2
     add eaptr, t0
+    map_m68k eaptr
     addi m_cycles, -8
     jr ra
 ea7_011: # (d8,PC,Xn)
-    addi eaptr, m_pc, -2
+    move eaptr, m_pc
     addi m_cycles, -10
     j ea_110_inner    
 
- ea7_100: ea7_101: ea7_110: ea7_111:
-    jr ra # FIXMe complete
+ea7_100: # #<data>
+    move eaptr, m_pc
+    and t0, opcode, 0xC0   # isolate opsize in opcode
+    addi m_pc, 2
+    bnez t0, 1f
+    addi eaptr, 1           # if opsize is byte, skip a byte
+1:
+    addi m_cycles, -4
+    jr ra
+
+ea7_101: ea7_110: ea7_111:
+    move a0, opcode
+    jal __m64k_assert_invalid_ea
+    addiu a1, m_pc, -2
     .set noreorder
 
 ###############################################################
@@ -308,8 +348,6 @@ rmw_table:
     .set reorder
 rmw8_easrc:
     li flag_bitsize, 24
-    map_m68k eaptr
-    breakpoint
     lb t0, 0(eaptr)
     lb t1, 3(dptr)
     jalr rmw_op
@@ -317,7 +355,6 @@ rmw8_easrc:
     j main_loop
 rmw16_easrc:
     li flag_bitsize, 16
-    map_m68k eaptr
     lh t0, 0(eaptr)
     lh t1, 2(dptr)
     jalr rmw_op
@@ -325,7 +362,6 @@ rmw16_easrc:
     j main_loop
 rmw32_easrc:
     li flag_bitsize, 0
-    map_m68k eaptr
     lwl t0, 0(eaptr)
     lwr t0, 3(eaptr)
     lw t1, 0(dptr)
@@ -334,7 +370,6 @@ rmw32_easrc:
     j main_loop
 rmw8_eadst:
     li flag_bitsize, 24
-    map_m68k eaptr
     lb t1, 3(dptr)
     lb t0, 0(eaptr)
     jalr rmw_op
@@ -342,7 +377,6 @@ rmw8_eadst:
     j main_loop
 rmw16_eadst:
     li flag_bitsize, 16
-    map_m68k eaptr
     lh t1, 2(dptr)
     lh t0, 0(eaptr)
     jalr rmw_op
@@ -352,7 +386,6 @@ rmw32_eadst:
     li flag_bitsize, 0
     lwl t1, 0(dptr)   # NOTE: this is to handle immediate case (where dptr is PC-relative)
     lwr t1, 3(dptr)
-    map_m68k eaptr
     lwl t0, 0(eaptr)
     lwr t0, 3(eaptr)
     jalr rmw_op
@@ -374,6 +407,7 @@ rmw32_eadst:
 .endm
 
 OP(andi):
+    ori opcode, 1<<8    # force rmw with eadst
     jal_and_j decode_imm, op_and_body
 OP(and):
     srl dptr, opcode, 7       # get data register pointer
@@ -382,10 +416,10 @@ OP(and):
     li opsize, 0
 op_and_body:
     jal decode_ea             # get EA pointer
-    nop
+    addi m_cycles, -6         # FIXME!!!
     
     srl t0, opcode, 4         # do RMW
-    andi t0, 0x3 << 2
+    andi t0, 0x7 << 2
     rmw t0, op_and_rmwimpl
 op_and_rmwimpl:
     .set reorder
