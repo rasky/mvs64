@@ -1,5 +1,50 @@
 #include <libdragon.h>
 #include <stdlib.h>
+#include <stdalign.h>
+#include "m64k.h"
+#include "tlb.h"
+
+uint8_t ram_pages[16][4096] alignas(4096);
+uint32_t ram_address[16];
+
+static void m68k_ram_init(void) {
+    memset(ram_address, 0xFF, sizeof(ram_address));
+    tlb_init();
+}
+
+static void m68k_ram_w8(uint32_t addr, uint8_t v) {
+    uint32_t page = addr & ~0xFFF;
+    for (int i=0;i<16;i++) {
+        if (ram_address[i] == 0xFFFFFFFF) {
+            ram_address[i] = page;
+            memset(ram_pages[i], 0, 4096);
+            tlb_map_area(i, page, 0xFFF, ram_pages[i], true);
+        }
+        if (ram_address[i] == page) {
+            ram_pages[i][addr & 0xFFF] = v;
+            // FIXME: is this really required? Check on real hardware
+            data_cache_hit_writeback_invalidate(&ram_pages[i][addr&0xFFF], 1);
+            return;
+        }
+    }
+    assertf(0, "Out of RAM pages");
+}
+
+static uint8_t m68k_ram_r8(uint32_t addr) {
+    uint32_t page = addr & ~0xFFF;
+    for (int i=0;i<16;i++) {
+        if (ram_address[i] == page) {
+            return ram_pages[i][addr & 0xFFF];
+        }
+        if (ram_address[i] == 0xFFFFFFFF) {
+            ram_address[i] = page;
+            memset(ram_pages[i], 0, 4096);
+            tlb_map_area(i, page, 0xFFF, ram_pages[i], true);
+            return 0;
+        }
+    }
+    assertf(0, "Out of RAM pages");
+}
 
 typedef struct  {
     uint32_t dregs[8];
@@ -30,7 +75,7 @@ void read_state(FILE *f, test_state_t *s)
 
 void run_testsuite(const char *fn)
 {
-    debugf("Running testsuite: %s", fn);
+    debugf("Running testsuite: %s\n", fn);
     FILE *f = asset_fopen(fn);
 
     // Read ID
@@ -52,6 +97,61 @@ void run_testsuite(const char *fn)
         test_state_t initial, final;
         read_state(f, &initial);
         read_state(f, &final);
+
+        // Run the test
+        m64k_t m64k;
+        m64k_init(&m64k);
+        memcpy(m64k.dregs, initial.dregs, sizeof(m64k.dregs));
+        memcpy(m64k.aregs, initial.aregs, sizeof(m64k.aregs));
+        m64k.usp = initial.usp;
+        m64k.ssp = initial.ssp;
+        m64k.pc = initial.pc;
+        m64k.sr = initial.sr;
+
+        m68k_ram_init();
+        m68k_ram_w8(initial.pc+0, initial.prefetch[0] >> 8);
+        m68k_ram_w8(initial.pc+1, initial.prefetch[0] & 0xff);
+        m68k_ram_w8(initial.pc+2, initial.prefetch[1] >> 8);
+        m68k_ram_w8(initial.pc+3, initial.prefetch[1] & 0xff);
+        for (int i=0; i<initial.nrams; i++) {
+            uint32_t addr = initial.ram[i][0];
+            uint32_t value = initial.ram[i][1];
+            m68k_ram_w8(addr, value);
+            debugf("RAM[%lx] = %02lx\n", addr, value);
+        }
+        // Make sure also locations mentioned in final state are mapped
+        for (int i=0; i<final.nrams; i++)
+            (void)m68k_ram_r8(final.ram[i][0]);
+
+        // Run the opcode
+        m64k_run(&m64k, 1);
+
+        // Check the results
+        bool failed = false;
+        for (int i=0; i<8; i++) {
+            if (m64k.dregs[i] != final.dregs[i])  {
+                debugf("D%d: %08lx != %08lx\n", i, m64k.dregs[i], final.dregs[i]);
+                failed = true;
+            }
+            if (i<7 && m64k.aregs[i] != final.aregs[i])  {
+                debugf("A%d: %08lx != %08lx\n", i, m64k.dregs[i], final.dregs[i]);
+                failed = true;
+            }
+        }
+        if (m64k.usp != final.usp) {
+            debugf("USP: %08lx != %08lx\n", m64k.usp, final.usp);
+            failed = true;
+        }
+        if (m64k.ssp != final.ssp) {
+            debugf("SSP: %08lx != %08lx\n", m64k.ssp, final.ssp);
+            failed = true;
+        }
+        if (m64k.sr != final.sr) {
+            debugf("SR: %08lx != %08lx\n", m64k.sr, final.sr);
+            failed = true;
+        }
+
+        if (failed) abort();
     }
 
     fclose(f);
@@ -79,8 +179,10 @@ int main()
 	strcpy(sbuf, "rom:/");
 	if (dfs_dir_findfirst(".", sbuf+5) == FLAGS_FILE) {
 		do {
-			if (strendswith(sbuf, ".btest"))
+			if (strendswith(sbuf, ".btest")) {
+                assert(num_tests < 256);
 				testfns[num_tests++] = strdup(sbuf);
+            }
 		} while (dfs_dir_findnext(sbuf+5) == FLAGS_FILE);
 	}
 
