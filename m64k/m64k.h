@@ -5,12 +5,12 @@
 
 typedef struct {
     uint32_t dregs[8];
-    uint32_t aregs[7];
+    uint32_t aregs[8];
     uint32_t usp;
     uint32_t ssp;
     uint32_t pc;
     uint32_t sr;
-
+    uint32_t dummy;
     int64_t cycles;
 } m64k_t;
 

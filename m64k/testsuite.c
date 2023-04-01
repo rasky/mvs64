@@ -110,6 +110,9 @@ void run_testsuite(const char *fn)
         m64k.ssp = initial.ssp;
         m64k.pc = initial.pc;
         m64k.sr = initial.sr;
+        if ((m64k.sr & 0xFF00) != 0x2700) {
+            debugf("SR = %04lx\n", m64k.sr);
+        }
 
         m68k_ram_init();
         m68k_ram_w8(initial.pc+0, initial.prefetch[0] >> 8);
@@ -120,6 +123,7 @@ void run_testsuite(const char *fn)
             uint32_t addr = initial.ram[i][0];
             uint32_t value = initial.ram[i][1];
             m68k_ram_w8(addr, value);
+            // debugf("RAM[%08lx] = %02lx\n", addr, value);
         }
         // Make sure also locations mentioned in final state are mapped
         for (int i=0; i<final.nrams; i++)

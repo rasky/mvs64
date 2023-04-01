@@ -1,4 +1,5 @@
 #include <regdef.h>
+#include "m64k_internal.h"
 
 #define M68K_MEMORY_BASE  0
 
@@ -29,20 +30,8 @@
     tne ra,ra
 .endm
 
-    .globl _m64k_aregs
-    .globl _m64k_dregs
-    .globl _m64k_pc
-    .globl _m64k_cycles
-    .globl _m64k_sr
-
-    .section .sdata
-_m64k_cycles: .long 0
-_m64k_pc:     .long 0
-_m64k_sr:     .long 0
+     .section .sdata
 flag_x:       .byte 0
-    .section .data
-_m64k_dregs:  .long 0,0,0,0,0,0,0,0
-_m64k_aregs:  .long 0,0,0,0,0,0,0,0
 
 optable0:
     .long   op4_0000, op4_0001, op4_0010, op4_0011, op4_0100, op4_0101, op4_0110, op4_0111
@@ -51,9 +40,11 @@ optable1:
     .long   op8_0000, op8_0001, op_andi,  op8_0011, op8_0100, op8_0101, op8_0110, op8_0111
     .long   op8_1000, op8_1001, op8_1010, op8_1011, op8_1100, op8_1101, op8_1110, op8_1111
 
-#define OP(x)       .balign 32; op_##x
-
     .text
+
+#define OP(x)       .balign 32; op_##x
+#define m64k        a0
+#define m_cycles    a1
 
 #define opcode      s0
 #define eaptr       s1
@@ -64,9 +55,37 @@ optable1:
 #define flag_zc     s7    // bit 0..31: !Z; bit 32: C
 
 #define m_pc          t5
-#define m_cycles      t6
 #define rmw_op        t7
 #define flag_bitsize  t8
+
+.macro la_m64k  reg, offset,base
+    add \reg, m64k, \base
+    .if \offset
+        addi \reg, \offset
+    .endif
+.endm
+
+.macro lw_m64k  reg, offset,base
+    .ifnb \base
+        .set noat
+        add $1, m64k, \base
+        lw \reg, \offset($1)
+        .set at
+    .else
+        lw \reg, \offset(m64k)
+    .endif
+.endm
+
+.macro sw_m64k  reg, offset,base
+    .ifnb \base
+        .set noat
+        add $1, m64k, \base
+        sw \reg, \offset($1)
+        .set at
+    .else
+        sw \reg, \offset(m64k)
+    .endif
+.endm
 
     .globl _m64k_asmrun
 _m64k_asmrun:
@@ -82,13 +101,17 @@ _m64k_asmrun:
     sd s8,96(sp)
     sd ra,104(sp)
 
-    lw m_cycles, _m64k_cycles
-    lw m_pc,     _m64k_pc
+    lw m_pc, M64K_OFF_PC(m64k)
+    lw t0, M64K_OFF_SR(m64k)
     map_m68k m_pc
 
-    # Extract flags from SR into flag_nv / flag_zc
-    lw t0,       _m64k_sr    # Format: ---X NZVC
+    srl t1, t0, 11                    # Isolate supervisor bit
+    andi t1, 4
+    lw_m64k t2, M64K_OFF_USP,t1       # Copy USP/SSP to A7
+    sw_m64k t2, M64K_OFF_AREGS+7*4
 
+    # Extract flags from SR into flag_nv / flag_zc
+    # SR Format: ---X NZVC
     srl t1, t0, 4          # X to bit 0
     andi t1, 1
     sb t1, flag_x
@@ -118,8 +141,7 @@ op4_0000:
     nop
 
 main_loop_exit:
-    sw m_cycles, _m64k_cycles
-    sw m_pc,     _m64k_pc
+    sw m_pc, M64K_OFF_PC(m64k)
 
     # Store flags into SR
     dsrl t0, flag_nv, 63    # N^V
@@ -142,10 +164,15 @@ main_loop_exit:
     sll t1, 4
     or t0, t1
     
-    lw t1, _m64k_sr
+    lw t1, M64K_OFF_SR(m64k)
     and t1, ~0x1f
     or t1, t0
-    sw t1, _m64k_sr
+    sw t1, M64K_OFF_SR(m64k)
+
+    srl t1, 11                        # Isolate supervisor bit
+    andi t1, 4
+    lw_m64k t2, M64K_OFF_AREGS+7*4    # Copy A7 to USP/SSP
+    sw_m64k t2, M64K_OFF_USP,t1       
 
     ld s0,32(sp)
     ld s1,40(sp)
@@ -159,7 +186,7 @@ main_loop_exit:
     ld ra,104(sp)
     addiu sp,sp,128
     jr ra
-    nop
+    move v0, m_cycles
 
 ###############################################################
 # Immediate computation
@@ -230,53 +257,57 @@ ea_111: # Register-less EAs
     .set reorder
 ea_000: # Dn
     decode_opsize
-    la eaptr, _m64k_dregs+4(t1)
+    la_m64k eaptr, M64K_OFF_DREGS+4,t1
     sub eaptr, opsize
     jr ra
 ea_001: # An
     decode_opsize
-    la eaptr, _m64k_aregs+4(t1)
+    la_m64k eaptr, M64K_OFF_AREGS+4,t1
     sub eaptr, opsize
     jr ra
 ea_010: # (An)
-    lw eaptr, _m64k_aregs(t1)
+    lw_m64k eaptr, M64K_OFF_AREGS,t1
     map_m68k eaptr
     addi m_cycles, -4
     jr ra
 ea_011: # (An)+
     # FIXME: align sp byte access
-    lw eaptr, _m64k_aregs(t1)
+    lw_m64k eaptr, M64K_OFF_AREGS,t1
     decode_opsize
     add t0, eaptr, opsize
     bne t1, 7*4, 1f   # if A7 (stack pointer), align to word
     add t0, 1
     and t0, ~1
 1:
-    sw t0, _m64k_aregs(t1)
+    sw_m64k t0, M64K_OFF_AREGS,t1
     map_m68k eaptr
     addi m_cycles, -4
     jr ra
 ea_100: # -(An)
-    lw eaptr, _m64k_aregs(t1)
+    lw_m64k eaptr, M64K_OFF_AREGS,t1
     decode_opsize
     sub eaptr, opsize
     bne t1, 7*4, 1f    # if A7 (stack pointer), align to word
     and eaptr, ~1
 1:
-    sw eaptr, _m64k_aregs(t1)
+    sw_m64k eaptr, M64K_OFF_AREGS,t1
     map_m68k eaptr
     addi m_cycles, -6
     jr ra
 ea_101: # (d16,An)
-    lw eaptr, _m64k_aregs(t1)
+    lw_m64k eaptr, M64K_OFF_AREGS,t1
     lh t0, 0(m_pc)
     addi m_pc, 2
     addu eaptr, t0
     map_m68k eaptr
     addi m_cycles, -8
     jr ra
+ea7_011: # (d8,PC,Xn)
+    move eaptr, m_pc
+    addi m_cycles, -10
+    j ea_110_inner    
 ea_110: # (d8,An,Xn)
-    lw eaptr, _m64k_aregs(t1)   # read An
+    lw_m64k eaptr, M64K_OFF_AREGS,t1   # read An
 ea_110_inner:
     lbu t1, 0(m_pc)  # read extension word
     lb t0, 1(m_pc)   # read 8-bit displacement
@@ -285,11 +316,11 @@ ea_110_inner:
     srl t0, t1, 2       # calculate pointer to Xn
     andi t0, 0xF << 2
     andi t2, t1, 0x8
-    lw t1, _m64k_dregs(t0)
+    add t0, m64k
+    lw t1, M64K_OFF_DREGS(t0)
     bnez t2, 1f
-    lh t1, _m64k_dregs+2(t0)
-1:
-    addu eaptr, t1
+    lh t1, M64K_OFF_DREGS+2(t0)
+1:  addu eaptr, t1
     map_m68k eaptr
     addi m_cycles, -10
     jr ra
@@ -314,11 +345,6 @@ ea7_010: # (d16,PC)
     map_m68k eaptr
     addi m_cycles, -8
     jr ra
-ea7_011: # (d8,PC,Xn)
-    move eaptr, m_pc
-    addi m_cycles, -10
-    j ea_110_inner    
-
 ea7_100: # #<data>
     move eaptr, m_pc
     and t0, opcode, 0xC0   # isolate opsize in opcode
@@ -412,7 +438,7 @@ OP(andi):
 OP(and):
     srl dptr, opcode, 7       # get data register pointer
     andi dptr, 0x7 << 2
-    la dptr, _m64k_dregs(dptr)
+    la_m64k dptr, M64K_OFF_DREGS,dptr
     li opsize, 0
 op_and_body:
     jal decode_ea             # get EA pointer
