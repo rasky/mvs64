@@ -359,14 +359,13 @@ ea_011: # (An)+
     map_m68k eaptr, eaptr32
     jr ra
 ea_100: # -(An)
-    lw_m64k eaptr32, M64K_OFF_AREGS,t1
-    decode_opsize
-    sub eaptr32, opsize
-    bne t1, 7*4, 1f    # if A7 (stack pointer), align to word
+    lw_m64k eaptr32, M64K_OFF_AREGS,t1   # read address register
+    decode_opsize                        # decode opsize (if wasn't already)
+    sub eaptr32, opsize                  # decrement address register
+    bne t1, 7*4, 1f                      # if A7 (stack pointer), align to word
     and eaptr32, ~1
-1:
-    sw_m64k eaptr32, M64K_OFF_AREGS,t1
-    map_m68k eaptr, eaptr32
+1:  sw_m64k eaptr32, M64K_OFF_AREGS,t1   # write back address register
+    map_m68k eaptr, eaptr32              # map address to N64 space
     jr ra
 ea_101: # (d16,An)
     lw_m64k eaptr32, M64K_OFF_AREGS,t1
@@ -519,16 +518,16 @@ rmw32_eadst:
 ###############################################################
 
 OP(addq):
-    srl t1, opcode, 9
+    srl t1, opcode, 9   # extract immediate value
     andi t1, 0x7
-    bnez t1, 1f
+    bnez t1, 1f         # if immediate is not 0, skip
     ori opcode, 1<<8    # force rmw with eadst
-    li t1, 8
-1:  sw t1, M64K_OFF_PENDINGEXC+4(m64k)
+    li t1, 8            # if immediate is 0, use 8
+1:  sw t1, M64K_OFF_PENDINGEXC+4(m64k)      # store imediate into dummy space
+    la dptr, M64K_OFF_PENDINGEXC+4(m64k)    # set dptr to dummy space
     la rmw_op, op_addq_rmwimpl
-    la dptr, M64K_OFF_PENDINGEXC+4(m64k)
     j rmw
-    li opsize, 0
+    li opsize, 0        # opsize not calculated yet
 OP(addi):
     jal decode_imm
     ori opcode, 1<<8    # force rmw with eadst
@@ -536,12 +535,16 @@ OP(addi):
     j rmw
     nop
 OP(add):
+    # check if the opcode is addx instead
+    andi t0, opcode, 0x130
+    xori t0, 0x100
+    beqz t0, op_addx          # if addx, jump to implementation
+    li opsize, 0              # opsize not calculated yet
     srl dptr, opcode, 7       # get data register pointer
     andi dptr, 0x7 << 2
-    la_m64k dptr, M64K_OFF_DREGS,dptr
     la rmw_op, op_add_rmwimpl
     j rmw
-    li opsize, 0
+    la_m64k dptr, M64K_OFF_DREGS,dptr
 op_add_rmwimpl:
     .set reorder
     daddu result, t0, t1
@@ -558,6 +561,39 @@ op_addq_rmwimpl:
     daddu result, t0, t1         # do add but leave flags unchanged
     jr ra
     .set noreorder
+
+OP(addx):
+    .set reorder
+    andi t0, opcode, 0x8         # isolate R/M bit
+    srl t1, opcode, 7            # extract Rx*4
+    andi t1, 0x7 << 2
+    beqz t0, op_addx_data        # checl if R/M is data or address
+op_addx_addr:
+    jal ea_100                   # decode Rx as pre-decrement address register
+    check_addr_error eaptr32, read_address_error_exit
+    la rmw_op, op_addx_rmwimpl
+    move dptr, eaptr             # set dptr to decoded address
+    xori opcode, 0x128           # force EA mode to predecrement, and EA dest mode
+    j rmw                        # do a standard rmw sequence (decoding Ry)
+op_addx_data:
+    jal ea_000                   # decode Rx as data register
+    la rmw_op, op_addx_rmwimpl
+    move dptr, eaptr             # set dptr to decoded address
+    xori opcode, 0x100           # force EA dest mode
+    j rmw                        # do a standard rmw sequence
+op_addx_rmwimpl:
+    daddu result, t0, t1
+    sne flag_x, 0
+    daddu result, flag_x
+    dsll flag_zc, result, flag_bitsize
+    dsrl flag_x, flag_zc, 32
+    sllv t0, t0, flag_bitsize
+    sllv t1, t1, flag_bitsize
+    daddu flag_nv, t0, t1
+    jr ra
+    .set noreorder
+
+
 
 OP(andi):
     ori opcode, 1<<8    # force rmw with eadst
