@@ -11,7 +11,11 @@
 .endm
 
 .macro zx64 dst, src
+    .ifnb \src
     dsll \dst, \src, 32
+    .else
+    dsll \dst, 32
+    .endif
     dsrl \dst, 32
 .endm
 
@@ -44,13 +48,12 @@
 
      .section .sdata
 pc_diff:      .long 0
-flag_x:       .byte 0
 
 optable0:
-    .long   op4_0000, op4_0001, op4_0010, op4_0011, op4_0100, op4_0101, op4_0110, op4_0111
-    .long   op4_1000, op4_1001, op4_1010, op4_1011, op_and,   op4_1101, op4_1110, op4_1111
+    .long   op4_0000, op4_0001, op4_0010, op4_0011, op4_0100, op_addq,  op4_0110, op4_0111
+    .long   op4_1000, op4_1001, op4_1010, op4_1011, op_and,   op_add,   op4_1110, op4_1111
 optable1:
-    .long   op8_0000, op8_0001, op_andi,  op8_0011, op8_0100, op8_0101, op8_0110, op8_0111
+    .long   op8_0000, op8_0001, op_andi,  op8_0011, op8_0100, op8_0101, op_addi,  op8_0111
     .long   op8_1000, op8_1001, op8_1010, op8_1011, op8_1100, op8_1101, op8_1110, op8_1111
 
     .text
@@ -66,6 +69,7 @@ optable1:
 #define result      s5
 #define flag_nv     s6    // bit 31: N; bit 63: N^V
 #define flag_zc     s7    // bit 0..31: !Z; bit 32: C
+#define flag_x      s8    // bit 0..31: X
 
 #define eaptr32       t4
 #define m_pc          t5
@@ -132,9 +136,8 @@ _m64k_asmrun:
 
     # Extract flags from SR into flag_nv / flag_zc
     # SR Format: ---X NZVC
-    srl t1, t0, 4          # X to bit 0
-    andi t1, 1
-    sb t1, flag_x
+    srl flag_x, t0, 4          # X to bit 0
+    andi flag_x, 1
 
     sll t1, t0, 28         # N to bit 31 (and 63)
     dsll flag_nv, t0, 62   # V to bit 63 (and 0 to 31)
@@ -190,10 +193,9 @@ main_loop_exit:
     sll t1, 2
     or t0, t1
 
-    lbu t1, flag_x           # X
-    sne t1, zero, t1
-    sll t1, 4
-    or t0, t1
+    sne flag_x, zero, flag_x
+    sll flag_x, 4
+    or t0, flag_x
     
     lw t1, M64K_OFF_SR(m64k)
     and t1, ~0x1f
@@ -436,6 +438,14 @@ ea7_101: ea7_110: ea7_111:
 # RMW accesses
 ###############################################################
 
+.macro rmw opmode, opfunc
+    .set reorder
+    lw t0, rmw_table(\opmode)
+    la rmw_op, \opfunc
+    jr t0
+    .set noreorder
+.endm
+
     .data
 rmw_table:
     .long   rmw8_easrc, rmw16_easrc, rmw32_easrc, rmw32_easrc
@@ -443,18 +453,24 @@ rmw_table:
 
     .text
     .set reorder
+rmw:
+    srl t3, opcode, 4
+    jal decode_ea             # get EA pointer
+    andi t3, 0x7 << 2
+    lw t3, rmw_table(t3)
+    jr t3
 rmw8_easrc:
     li flag_bitsize, 24
-    lb t0, 0(eaptr)
-    lb t1, 3(dptr)
+    lbu t0, 0(eaptr)
+    lbu t1, 3(dptr)
     jalr rmw_op
     sb result, 3(dptr)
     j main_loop
 rmw16_easrc:
     check_addr_error eaptr32, read_address_error_exit
     li flag_bitsize, 16
-    lh t0, 0(eaptr)
-    lh t1, 2(dptr)
+    lhu t0, 0(eaptr)
+    lhu t1, 2(dptr)
     jalr rmw_op
     sh result, 2(dptr)
     j main_loop
@@ -463,22 +479,23 @@ rmw32_easrc:
     li flag_bitsize, 0
     lwl t0, 0(eaptr)
     lwr t0, 3(eaptr)
-    lw t1, 0(dptr)
+    lwu t1, 0(dptr)
+    zx64 t0
     jalr rmw_op
     sw result, 0(dptr)
     j main_loop
 rmw8_eadst:
     li flag_bitsize, 24
-    lb t1, 3(dptr)
-    lb t0, 0(eaptr)
+    lbu t1, 3(dptr)
+    lbu t0, 0(eaptr)
     jalr rmw_op
     sb result, 0(eaptr)
     j main_loop
 rmw16_eadst:
     check_addr_error eaptr32, read_address_error_exit
     li flag_bitsize, 16
-    lh t1, 2(dptr)
-    lh t0, 0(eaptr)
+    lhu t1, 2(dptr)
+    lhu t0, 0(eaptr)
     jalr rmw_op
     sh result, 0(eaptr)
     j main_loop
@@ -489,6 +506,8 @@ rmw32_eadst:
     lwr t1, 3(dptr)
     lwl t0, 0(eaptr)
     lwr t0, 3(eaptr)
+    zx64 t1
+    zx64 t0
     jalr rmw_op
     swl result, 0(eaptr)
     swr result, 3(eaptr)
@@ -499,13 +518,46 @@ rmw32_eadst:
 # Opcodes
 ###############################################################
 
-.macro rmw opmode, opfunc
+OP(addq):
+    srl t1, opcode, 9
+    andi t1, 0x7
+    bnez t1, 1f
+    ori opcode, 1<<8    # force rmw with eadst
+    li t1, 8
+1:  sw t1, M64K_OFF_PENDINGEXC+4(m64k)
+    la rmw_op, op_addq_rmwimpl
+    la dptr, M64K_OFF_PENDINGEXC+4(m64k)
+    j rmw
+    li opsize, 0
+OP(addi):
+    jal decode_imm
+    ori opcode, 1<<8    # force rmw with eadst
+    la rmw_op, op_add_rmwimpl
+    j rmw
+    nop
+OP(add):
+    srl dptr, opcode, 7       # get data register pointer
+    andi dptr, 0x7 << 2
+    la_m64k dptr, M64K_OFF_DREGS,dptr
+    la rmw_op, op_add_rmwimpl
+    j rmw
+    li opsize, 0
+op_add_rmwimpl:
     .set reorder
-    lw t0, rmw_table(\opmode)
-    la rmw_op, \opfunc
-    jr t0
+    daddu result, t0, t1
+    dsll flag_zc, result, flag_bitsize
+    dsrl flag_x, flag_zc, 32
+    sllv t0, t0, flag_bitsize
+    sllv t1, t1, flag_bitsize
+    daddu flag_nv, t0, t1
+    jr ra
+op_addq_rmwimpl:
+    srl t2, opcode, 3            # check if EA is An
+    andi t2, 7
+    bne t2, 1, op_add_rmwimpl    # if not, do normal add
+    daddu result, t0, t1         # do add but leave flags unchanged
+    jr ra
     .set noreorder
-.endm
 
 OP(andi):
     ori opcode, 1<<8    # force rmw with eadst
