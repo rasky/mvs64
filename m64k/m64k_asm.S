@@ -221,6 +221,10 @@ main_loop_exit:
     jr ra
     move v0, m_cycles
 
+###############################################################
+# Address error handling
+###############################################################
+
 #if M64K_CONFIG_ADDRERR
     .data 
     # Table to help setting up address error. Each entry is a pair of
@@ -518,6 +522,7 @@ rmw32_eadst:
 ###############################################################
 
 OP(addq):
+    la rmw_op, op_addq_rmwimpl
     srl t1, opcode, 9   # extract immediate value
     andi t1, 0x7
     bnez t1, 1f         # if immediate is not 0, skip
@@ -525,24 +530,23 @@ OP(addq):
     li t1, 8            # if immediate is 0, use 8
 1:  sw t1, M64K_OFF_PENDINGEXC+4(m64k)      # store imediate into dummy space
     la dptr, M64K_OFF_PENDINGEXC+4(m64k)    # set dptr to dummy space
-    la rmw_op, op_addq_rmwimpl
     j rmw
     li opsize, 0        # opsize not calculated yet
 OP(addi):
+    la rmw_op, op_add_rmwimpl
     jal decode_imm
     ori opcode, 1<<8    # force rmw with eadst
-    la rmw_op, op_add_rmwimpl
     j rmw
     nop
 OP(add):
     # check if the opcode is addx instead
+    la rmw_op, op_add_rmwimpl
     andi t0, opcode, 0x130
     xori t0, 0x100
     beqz t0, op_addx          # if addx, jump to implementation
     li opsize, 0              # opsize not calculated yet
     srl dptr, opcode, 7       # get data register pointer
     andi dptr, 0x7 << 2
-    la rmw_op, op_add_rmwimpl
     j rmw
     la_m64k dptr, M64K_OFF_DREGS,dptr
 op_add_rmwimpl:
@@ -564,21 +568,25 @@ op_addq_rmwimpl:
 
 OP(addx):
     .set reorder
+    la rmw_op, op_addx_rmwimpl
     andi t0, opcode, 0x8         # isolate R/M bit
     srl t1, opcode, 7            # extract Rx*4
     andi t1, 0x7 << 2
     beqz t0, op_addx_data        # checl if R/M is data or address
 op_addx_addr:
     jal ea_100                   # decode Rx as pre-decrement address register
+    #if M64K_CONFIG_ADDRERROR
+    beq opsize, 1, 1f
     check_addr_error eaptr32, read_address_error_exit
-    la rmw_op, op_addx_rmwimpl
-    move dptr, eaptr             # set dptr to decoded address
+    #endif
+1:  add dptr, eaptr, opsize      # set dptr to decoded address
+    addi dptr, -4
     xori opcode, 0x128           # force EA mode to predecrement, and EA dest mode
     j rmw                        # do a standard rmw sequence (decoding Ry)
 op_addx_data:
     jal ea_000                   # decode Rx as data register
-    la rmw_op, op_addx_rmwimpl
-    move dptr, eaptr             # set dptr to decoded address
+    add dptr, eaptr, opsize      # set dptr to decoded address
+    addi dptr, -4
     xori opcode, 0x100           # force EA dest mode
     j rmw                        # do a standard rmw sequence
 op_addx_rmwimpl:
@@ -590,6 +598,8 @@ op_addx_rmwimpl:
     sllv t0, t0, flag_bitsize
     sllv t1, t1, flag_bitsize
     daddu flag_nv, t0, t1
+    sllv t1, flag_x, flag_bitsize
+    daddu flag_nv, t1
     jr ra
     .set noreorder
 

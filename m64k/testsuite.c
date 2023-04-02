@@ -185,6 +185,7 @@ int main()
 
     dfs_init(DFS_DEFAULT_LOCATION);
 
+#if 0
     char* testfns[256];
     int num_tests = 0;
 
@@ -198,9 +199,26 @@ int main()
             }
 		} while (dfs_dir_findnext(sbuf+5) == FLAGS_FILE);
 	}
+#else
+    static const char *testfns[] = {
+        // "rom:/AND.b.btest",
+        // "rom:/AND.l.btest",
+        // "rom:/AND.w.btest",
+        // "rom:/ADD.b.btest",
+        // "rom:/ADD.l.btest",
+        // "rom:/ADD.w.btest",
+        "rom:/ADDX.b.btest",
+        "rom:/ADDX.l.btest",
+        "rom:/ADDX.w.btest",
+        "rom:/ADDA.l.btest",
+        "rom:/ADDA.w.btest",
+    };
+    int num_tests = sizeof(testfns)/sizeof(testfns[0]);
+#endif
 
     for (int i=0; i<num_tests; i++) {
         run_testsuite(testfns[i]);
     }
+
     debugf("Finished testsuite\n");
 }
