@@ -497,8 +497,8 @@ ea7_101: ea7_110: ea7_111:
 
     .data
 rmw_table:
-    .long   rmw8_easrc, rmw16_easrc, rmw32_easrc, rmw32_easrc
-    .long   rmw8_eadst, rmw16_eadst, rmw32_eadst, rmw32_eadst
+    .long   rmw8_easrc, rmw16_easrc, rmw32_easrc, invalid_opmode
+    .long   rmw8_eadst, rmw16_eadst, rmw32_eadst, invalid_opmode
 
     .text
     .set noreorder
@@ -564,6 +564,11 @@ rmw32_eadst:
     swl result, 0(eaptr)
     swr result, 3(eaptr)
     j main_loop
+
+invalid_opmode:
+    move a0, opcode
+    addiu a1, m_pc, -2
+    jal __m64k_assert_invalid_opmode
     .set noreorder
 
 ###############################################################
@@ -587,7 +592,10 @@ op_addq_rmwimpl:
     bne t2, 1, op_add_rmwimpl    # if not, do normal add
     daddu result, t0, t1         # do add but leave flags unchanged
     jr ra
+    nop
+
 OP(addi):
+    .set reorder
     la rmw_op, op_add_rmwimpl
     jal decode_imm
     ori opcode, 1<<8    # force rmw with eadst
@@ -596,16 +604,17 @@ OP(addi):
 OP(add):
     # check if the opcode is addx instead
     la rmw_op, op_add_rmwimpl
+    srl dptr, opcode, 7       # get data register pointer
+    andi dptr, 0x7 << 2       # isolate data register pointer
+    la_m64k dptr, M64K_OFF_DREGS,dptr
+    andi t0, opcode, 0xC0
+    beq t0, 0xC0, op_adda     # if adda jump to implementation
     andi t0, opcode, 0x130
     xori t0, 0x100
-    beqz t0, op_addx          # if addx, jump to implementation
     li opsize, 0              # opsize not calculated yet
-    srl dptr, opcode, 7       # get data register pointer
-    andi dptr, 0x7 << 2
+    beqz t0, op_addx          # if addx, jump to implementation
     j rmw
-    la_m64k dptr, M64K_OFF_DREGS,dptr
 op_add_rmwimpl:
-    .set reorder
     daddu result, t0, t1
     dsll flag_zc, result, flag_bitsize
     dsrl flag_x, flag_zc, 32
@@ -655,6 +664,27 @@ op_addx_rmwimpl:
     jr ra
     .set noreorder
 
+OP(adda):
+    .set reorder
+    addi dptr, 32                   # Point to AREG instead of DREG
+    andi t0, opcode, 0x100          # Check W/L bit
+    bnez t0, 1f                     # Jump to correct body
+    la rmw_op, op_adda16_rmwimpl    # ADDA 16-bit
+    li opsize, 2                      # Force word size in EA decoding
+    jal decode_ea                     # Decode EA
+    addi eaptr, -2                    # Convert eaptr to long (for rmw32)
+    j rmw32_easrc                     # Do RMW
+1:  la rmw_op, op_adda32_rmwimpl    # ADDA 32-bit
+    li opsize, 4                      # Force long size in EA decoding
+    jal decode_ea                     # Decode EA
+    j rmw32_easrc                     # Do RMW
+op_adda16_rmwimpl:
+    sll t0, 16
+    sra t0, 16
+op_adda32_rmwimpl:
+    daddu result, t0, t1
+    jr ra
+    .set noreorder
 
 
 OP(andi):
