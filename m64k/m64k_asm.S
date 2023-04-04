@@ -230,8 +230,8 @@ main_loop_exit:
     # Table to help setting up address error. Each entry is a pair of
     # 8-bit values, first is the PC offset to rollback, second is the
     # "FC" code which is put into the stack frame.
-adderr_pcoff:  .byte  0,0,  0,0, -2,5, -2,5, -2,5, -2,5, -2,5,  0,0
-adderr7_pcoff: .byte -2,5, -2,5, -2,5, -2,5,  0,0,  0,0,  0,0,  0,0
+addrerr_pcoff:  .byte  0,0,  0,0, -2,5, -2,5, -2,5, -2,5, -2,5,  0,0
+addrerr7_pcoff: .byte -2,5, -2,5, -2,5, -2,5,  0,0,  0,0,  0,0,  0,0
 
     .text
     .set reorder
@@ -244,12 +244,12 @@ address_error_exit:
     li t0, M64K_PENDINGEXC_ADDRERR
     sw_m64k t0, M64K_OFF_PENDINGEXC+0
     sw_m64k eaptr32, M64K_OFF_PENDINGEXC+4
-
+addrerr_fetch_pcoff:
+    # Compute PC offset and FC code
     # Fetch the PC/FC table entry using EA
-    lw opcode, M64K_OFF_IR(m64k)
     srl t0, opcode, 2
     andi t0, 0x7<<1
-    la t1, adderr_pcoff
+    la t1, addrerr_pcoff
     bne t0, 7<<1, compute_fc
 adderr_off7:
     andi t0, opcode, 7
@@ -257,15 +257,62 @@ adderr_off7:
     sll t0, 1
 compute_fc:
     add t1, t0
-    lb t0, 0(t1)    # PC offset
-    lbu t1, 1(t1)   # FC code
-    add m_pc, t0    # Rollback PC
+    lb t0, 0(t1)                         # PC offset
+    lbu t1, 1(t1)                        # FC code
+    add m_pc, t0                         # Rollback PC
+    lw opcode, M64K_OFF_IR(m64k)         # Restore original opcode
     andi t0, opcode, 0xFFE0
     or t0, t1                            # Merge FC (4 bits) with opcode
     or t0, t2                            # Merge read/write flag
     sw_m64k t0, M64K_OFF_PENDINGEXC+8    # Store FC
 
+    # Check if we need fixups
+    # Fixup for ADDX pre-decrement
+    andi t0, opcode, 0xF138
+    beq t0, 0xD108, addrerr_fixup_addq
     j main_loop_exit
+
+addrerr_fixup_addq:
+    #define lhs eaptr
+    #define rhs eaptr32
+
+    li t1, 0               # compute address adjustment
+    bne opsize, 4, 1f      # 16-bit: 0
+    li t1, 2               # 32-bit: 2
+
+    # Decode LHS operand (Ry)
+1:  andi t0, opcode, 0x7
+    sll t0, 2
+    la_m64k lhs, M64K_OFF_AREGS,t0
+    lw t0, 0(lhs)
+    andi t2, t0, 1   # check if LHS is odd
+    beqz t2, 1f      # jump to RHS odd
+
+    add t0, t1       # adjust LHS to the expected error address
+    sw t0, 0(lhs)
+    sw_m64k t0, M64K_OFF_PENDINGEXC+4  # store LHS as address error
+
+    addi m_pc, -2                      # adjust expected PC
+    lw_m64k t0, M64K_OFF_PENDINGEXC+8  # read FC
+    xori t0, 0x5                       # adjust given that this is a read address exception
+    sw_m64k t0, M64K_OFF_PENDINGEXC+8  # write FC
+
+    j main_loop_exit
+
+1:  # rhs is odd and causing exception
+    # Decode RHS operand (Ry)
+    srl t0, opcode, 7
+    andi t0, 0x7 << 2
+    la_m64k rhs, M64K_OFF_AREGS,t0
+    lw t0, 0(rhs)                      # read RHS
+    add t0, t1                         # adjust RHS to the expected error address
+    sw t0, 0(rhs)                      # write RHS
+    sw_m64k t0, M64K_OFF_PENDINGEXC+4  # store RHS as address error
+    j main_loop_exit
+
+    #undef lhs
+    #undef rhs
+
     .set noreorder
 #endif
 
@@ -313,9 +360,10 @@ ea7_table:
      # Decode EA. opsize must be set to 1, 2 or 4. 
      # When 0, extracts from opcode
 decode_ea:
+    andi t1, opcode, 0x7
+decode_ea_customreg:    # Like decode_ea, but t1 is already set to the register to use in decoding
     srl t0, opcode, 1
     andi t0, 0x7 << 2
-    andi t1, opcode, 0x7
     lw t0, ea_table(t0)
     jr t0
     sll t1, 2
@@ -351,15 +399,13 @@ ea_010: # (An)
     map_m68k eaptr, eaptr32
     jr ra
 ea_011: # (An)+
-    # FIXME: align sp byte access
     lw_m64k eaptr32, M64K_OFF_AREGS,t1
     decode_opsize
     add t0, eaptr32, opsize
     bne t1, 7*4, 1f   # if A7 (stack pointer), align to word
     add t0, 1
     and t0, ~1
-1:
-    sw_m64k t0, M64K_OFF_AREGS,t1
+1:  sw_m64k t0, M64K_OFF_AREGS,t1
     map_m68k eaptr, eaptr32
     jr ra
 ea_100: # -(An)
@@ -455,13 +501,16 @@ rmw_table:
     .long   rmw8_eadst, rmw16_eadst, rmw32_eadst, rmw32_eadst
 
     .text
-    .set reorder
+    .set noreorder
 rmw:
-    srl t3, opcode, 4
-    jal decode_ea             # get EA pointer
+    jal decode_ea             # decode EA into eaptr/eaptr32
+rmw_no_ea:
+    srl t3, opcode, 4         # extract size+src/dst flag
     andi t3, 0x7 << 2
     lw t3, rmw_table(t3)
-    jr t3
+    jr t3                     # jump to the rmw function
+    nop
+    .set reorder
 rmw8_easrc:
     li flag_bitsize, 24
     lbu t0, 0(eaptr)
@@ -532,6 +581,12 @@ OP(addq):
     la dptr, M64K_OFF_PENDINGEXC+4(m64k)    # set dptr to dummy space
     j rmw
     li opsize, 0        # opsize not calculated yet
+op_addq_rmwimpl:
+    srl t2, opcode, 3            # check if EA is An
+    andi t2, 7
+    bne t2, 1, op_add_rmwimpl    # if not, do normal add
+    daddu result, t0, t1         # do add but leave flags unchanged
+    jr ra
 OP(addi):
     la rmw_op, op_add_rmwimpl
     jal decode_imm
@@ -558,48 +613,45 @@ op_add_rmwimpl:
     sllv t1, t1, flag_bitsize
     daddu flag_nv, t0, t1
     jr ra
-op_addq_rmwimpl:
-    srl t2, opcode, 3            # check if EA is An
-    andi t2, 7
-    bne t2, 1, op_add_rmwimpl    # if not, do normal add
-    daddu result, t0, t1         # do add but leave flags unchanged
-    jr ra
     .set noreorder
 
 OP(addx):
     .set reorder
     la rmw_op, op_addx_rmwimpl
     andi t0, opcode, 0x8         # isolate R/M bit
-    srl t1, opcode, 7            # extract Rx*4
-    andi t1, 0x7 << 2
+    andi t1, opcode, 0x7         # extract Ry*4
+    sll t1, 2
     beqz t0, op_addx_data        # checl if R/M is data or address
 op_addx_addr:
     jal ea_100                   # decode Rx as pre-decrement address register
-    #if M64K_CONFIG_ADDRERROR
+    #if M64K_CONFIG_ADDRERR
     beq opsize, 1, 1f
     check_addr_error eaptr32, read_address_error_exit
     #endif
-1:  add dptr, eaptr, opsize      # set dptr to decoded address
-    addi dptr, -4
-    xori opcode, 0x128           # force EA mode to predecrement, and EA dest mode
-    j rmw                        # do a standard rmw sequence (decoding Ry)
+1:  xori opcode, 0x28            # force EA mode to predecrement
+    j op_addx_finish
 op_addx_data:
     jal ea_000                   # decode Rx as data register
+op_addx_finish:
     add dptr, eaptr, opsize      # set dptr to decoded address
-    addi dptr, -4
-    xori opcode, 0x100           # force EA dest mode
-    j rmw                        # do a standard rmw sequence
+    srl t1, opcode, 9            # extract Ry
+    andi t1, 0x7
+    jal decode_ea_customreg      # decode EA with Ry
+    addi dptr, -4                # finish adjusting dptr (so that rmw does the right thing)
+    j rmw_no_ea
 op_addx_rmwimpl:
-    daddu result, t0, t1
-    sne flag_x, 0
-    daddu result, flag_x
-    dsll flag_zc, result, flag_bitsize
-    dsrl flag_x, flag_zc, 32
-    sllv t0, t0, flag_bitsize
+    sne flag_x, 0                        # set flag_x to 0/1
+    zx64 t2, flag_zc                     # put current Z flag (without C) into t2
+    daddu result, t0, t1                 # compute full size result
+    daddu result, flag_x                 # add flag_x
+    dsll flag_zc, result, flag_bitsize   # compute new flag_zc
+    or flag_zc, t2                       # combine with old Z flag
+    sllv t0, t0, flag_bitsize            # put operands into MSB
     sllv t1, t1, flag_bitsize
-    daddu flag_nv, t0, t1
-    sllv t1, flag_x, flag_bitsize
-    daddu flag_nv, t1
+    sllv flag_x, flag_x, flag_bitsize
+    daddu flag_nv, t0, t1                # compute flag_nv
+    daddu flag_nv, flag_x
+    dsrl flag_x, flag_zc, 32             # copy new carry bit into flag_x
     jr ra
     .set noreorder
 
