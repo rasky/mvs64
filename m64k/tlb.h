@@ -13,7 +13,7 @@ static void tlb_init(void) {
 	}
 }
 
-static void tlb_map_area_internal(unsigned int idx, uint32_t virt, uint32_t vmask, void *phys, bool readwrite, uint32_t vpn2)
+static void tlb_map_area_internal(unsigned int idx, uint32_t virt, uint32_t vmask, uint32_t phys, bool readwrite, uint32_t vpn2)
 {
 	bool low_half = !(virt & (vmask+1));
 
@@ -39,7 +39,7 @@ static void tlb_map_area_internal(unsigned int idx, uint32_t virt, uint32_t vmas
 	}
 
 	// Create the new entry
-	uint32_t entry = ((uint32_t)phys & 0x3FFFF000) >> 6;
+	uint32_t entry = (phys & 0x3FFFF000) >> 6;
 	if (readwrite)
 		entry |= (1<<2); // dirty bit
 	entry |= 1<<1; // valid bit
@@ -60,8 +60,9 @@ static void tlb_map_area_internal(unsigned int idx, uint32_t virt, uint32_t vmas
 	C0_TLBWI();
 }
 
-static void tlb_map_area(unsigned int idx, uint32_t virt, uint32_t vmask, void* phys, bool readwrite) {
-
+static void tlb_map_area(unsigned int idx, void *virt, uint32_t vmask, uint32_t phys, bool readwrite)
+{
+	uint32_t vaddr = (uint32_t)virt;
 	assert(idx < 32);
 
 	// Check if the mask is valid, and if it requires usage of both slots of an entry
@@ -83,17 +84,28 @@ static void tlb_map_area(unsigned int idx, uint32_t virt, uint32_t vmask, void* 
 
 	// Verify that the addresses are aligned to the needed vmask.
 	assert(((uint32_t)phys & vmask) == 0);
-	assert((virt & vmask) == 0);
+	assert((vaddr & vmask) == 0);
+	if (vmask == 0x000FFF) {
+		// Unfortunately, data cache is indexed using bits 12:4, so a TLB-mapped
+		// 4k page might use different cachelines compared to using the 0x8000_0000
+		// segment to access the same physical address.
+		// This is not forbidden per se, but it can create nasty cache coherency
+		// issues, so better forbid it altogether.
+		assertf((vaddr & (vmask+1)) == (phys & (vmask+1)),
+			"cached 4K pages should be created with virtual addresses having the same 8K alignment of the physical address.\n"
+			"vaddr=0x%08lx (8K alignment: 0x%08lx)\n"
+			"paddr=0x%08lx (8K alignment: 0x%08lx)\n", vaddr, vaddr & (vmask+1), phys, phys & (vmask+1));
+	}
 
 	// If this is a double mapping, we are going to write two slots, and each
 	// one has half the vmask.
 	if (dbl) vmask >>= 1;
 
-	uint32_t vpn2 = virt;
+	uint32_t vpn2 = vaddr;
 	if (!dbl) vpn2 &= ~(vmask+1); // ????
 
 	// Map the entries
-	tlb_map_area_internal(idx, virt, vmask, phys,         readwrite, vpn2);
+	tlb_map_area_internal(idx, vaddr, vmask, phys,         readwrite, vpn2);
 	if (dbl)
-		tlb_map_area_internal(idx, virt, vmask, phys+vmask+1, readwrite, vpn2);
+		tlb_map_area_internal(idx, vaddr+vmask+1, vmask, phys+vmask+1, readwrite, vpn2);
 }

@@ -4,7 +4,7 @@
 #include "m64k.h"
 #include "tlb.h"
 
-uint8_t ram_pages[16][4096] alignas(4096);
+uint8_t ram_pages[16][8192] alignas(8192);
 uint32_t ram_address[16];
 
 static void m68k_ram_init(void) {
@@ -13,17 +13,16 @@ static void m68k_ram_init(void) {
 }
 
 static void m68k_ram_w8(uint32_t addr, uint8_t v) {
-    uint32_t page = addr & ~0xFFF;
+    uint32_t page = (addr & ~0x1FFF) | M68K_CONFIG_MEMORY_BASE;
+
     for (int i=0;i<16;i++) {
         if (ram_address[i] == 0xFFFFFFFF) {
             ram_address[i] = page;
-            memset(ram_pages[i], 0, 4096);
-            tlb_map_area(i, page, 0xFFF, ram_pages[i], true);
+            memset(ram_pages[i], 0, 8192);
+            tlb_map_area(i, (void*)page, 0x1FFF, PhysicalAddr(ram_pages[i]), true);
         }
         if (ram_address[i] == page) {
-            ram_pages[i][addr & 0xFFF] = v;
-            // FIXME: is this really required? Check on real hardware
-            data_cache_hit_writeback_invalidate(&ram_pages[i][addr&0xFFF], 1);
+            ram_pages[i][addr & 0x1FFF] = v;
             return;
         }
     }
@@ -31,17 +30,16 @@ static void m68k_ram_w8(uint32_t addr, uint8_t v) {
 }
 
 static uint8_t m68k_ram_r8(uint32_t addr) {
-    uint32_t page = addr & ~0xFFF;
+    uint32_t page = (addr & ~0x1FFF) | M68K_CONFIG_MEMORY_BASE;
     for (int i=0;i<16;i++) {
         if (ram_address[i] == page) {
-            return *(uint8_t*)addr;
-            return ram_pages[i][addr & 0xFFF];
+            return ram_pages[i][addr & 0x1FFF];
         }
         if (ram_address[i] == 0xFFFFFFFF) {
             ram_address[i] = page;
-            memset(ram_pages[i], 0, 4096);
+            memset(ram_pages[i], 0, 8192);
             debugf("Mapping RAM page %d at %08lx\n", i, page);
-            tlb_map_area(i, page, 0xFFF, ram_pages[i], true);
+            tlb_map_area(i, (void*)page, 0x1FFF, PhysicalAddr(ram_pages[i]), true);
             return 0;
         }
     }
