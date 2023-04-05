@@ -50,17 +50,20 @@
 pc_diff:      .long 0
 
 optable0:
-    .long   op_tbl2,  op_moveb, op_movel, op_movew, op4_0100, op_addq,  op4_0110, op_moveq
-    .long   op4_1000, op4_1001, op4_1010, op4_1011, op_and,   op_add,   op4_1110, op4_1111
-optable1:
+    .long   op_tbl8,  op_moveb, op_movel, op_movew, op_tbl4,  op_addq,  op0_0110, op_moveq
+    .long   op0_1000, op0_1001, op0_1010, op0_1011, op_and,   op_add,   op0_1110, op0_1111
+optable8:
     .long   op8_0000, op8_0001, op_andi,  op8_0011, op8_0100, op8_0101, op_addi,  op8_0111
     .long   op8_1000, op8_1001, op8_1010, op8_1011, op8_1100, op8_1101, op8_1110, op8_1111
+optable4:
+    .long   op_mvfsr, op4_0001, op4_0010, op4_0011, op_mvccr, op4_0101, op_mvtsr, op4_0111
+    .long   op4_1000, op4_1001, op4_1010, op4_1011, op4_1100, op4_1101, op_mvusp, op4_1111
 
     .text
 
 #define OP(x)       .balign 32; op_##x
 #define m64k        a0
-#define m_cycles    a1
+#define m_cycles    a1    // cycles to execute (NOTE: must be kept caller-saved register)
 
 #define opcode      s0
 #define eaptr       s1
@@ -129,24 +132,8 @@ _m64k_asmrun:
     sub t1, m_pc
     sw t1, pc_diff                    # Save difference between m_pc and PC
 
-    srl t1, t0, 11                    # Isolate supervisor bit
-    andi t1, 4
-    lw_m64k t2, M64K_OFF_USP,t1       # Copy USP/SSP to A7
-    sw_m64k t2, M64K_OFF_AREGS+7*4
-
-    # Extract flags from SR into flag_nv / flag_zc
-    # SR Format: ---X NZVC
-    srl flag_x, t0, 4          # X to bit 0
-    andi flag_x, 1
-
-    sll t1, t0, 28         # N to bit 31 (and 63)
-    dsll flag_nv, t0, 62   # V to bit 63 (and 0 to 31)
-    xor flag_nv, t1       
-
-    andi t1, t0, 4         # Isolate Z
-    xori t1, 4             # !Z
-    dsll flag_zc, t0, 32   # C to bit 32
-    or flag_zc, t1
+    jal reload_sr
+    nop
 
 main_loop:
     blez m_cycles, main_loop_exit
@@ -162,10 +149,16 @@ main_loop:
     addi m_pc, 2
     jr t0
     sub m_cycles, t1
-op_tbl2:
+op_tbl8:
     srl t0, opcode, 6
     andi t0, 0xF << 2
-    lw t0, optable1(t0)
+    lw t0, optable8(t0)
+    jr t0
+    nop
+op_tbl4:
+    srl t0, opcode, 6
+    andi t0, 0xF << 2
+    lw t0, optable4(t0)
     jr t0
     nop
 
@@ -177,6 +170,24 @@ main_loop_exit:
     sw opcode, M64K_OFF_IR(m64k)
     #endif
 
+    jal flush_sr
+    nop
+
+    ld s0,32(sp)
+    ld s1,40(sp)
+    ld s2,48(sp)
+    ld s3,56(sp)
+    ld s4,64(sp)
+    ld s5,72(sp)
+    ld s6,80(sp)
+    ld s7,88(sp)
+    ld s8,96(sp)
+    ld ra,104(sp)
+    addiu sp,sp,128
+    jr ra
+    move v0, m_cycles
+
+flush_sr:
     # Store flags into SR
     dsrl t0, flag_nv, 63    # N^V
     srl t1, flag_nv, 31     # N
@@ -202,24 +213,38 @@ main_loop_exit:
     or t1, t0
     sw t1, M64K_OFF_SR(m64k)
 
-    srl t1, 11                        # Isolate supervisor bit
-    andi t1, 4
-    lw_m64k t2, M64K_OFF_AREGS+7*4    # Copy A7 to USP/SSP
-    sw_m64k t2, M64K_OFF_USP,t1       
+    srl t0, t1, 11                        # Isolate supervisor bit
+    andi t0, 4
+    lw_m64k t2, M64K_OFF_AREGS+7*4        # Copy A7 to USP/SSP
+    sw_m64k t2, M64K_OFF_USP,t0
 
-    ld s0,32(sp)
-    ld s1,40(sp)
-    ld s2,48(sp)
-    ld s3,56(sp)
-    ld s4,64(sp)
-    ld s5,72(sp)
-    ld s6,80(sp)
-    ld s7,88(sp)
-    ld s8,96(sp)
-    ld ra,104(sp)
-    addiu sp,sp,128
+    jr ra   # return SR in t1
+    nop
+
+
+reload_sr: # t0 = SR
+    # Extract flags from SR into flag_nv / flag_zc
+    # SR Format: ---X NZVC
+    srl flag_x, t0, 4          # X to bit 0
+    andi flag_x, 1
+
+    sll t1, t0, 28         # N to bit 31 (and 63)
+    dsll flag_nv, t0, 62   # V to bit 63 (and 0 to 31)
+    xor flag_nv, t1       
+
+    andi t1, t0, 4         # Isolate Z
+    xori t1, 4             # !Z
+    dsll flag_zc, t0, 32   # C to bit 32
+    or flag_zc, t1
+
+    srl t1, t0, 11                    # Isolate supervisor bit
+    andi t1, 4
+    lw_m64k t2, M64K_OFF_USP,t1       # Copy USP/SSP to A7
+    sw_m64k t2, M64K_OFF_AREGS+7*4
+
     jr ra
-    move v0, m_cycles
+    nop
+
 
 ###############################################################
 # Address error handling
@@ -260,7 +285,7 @@ address_error:
     sw_m64k eaptr32, M64K_OFF_PENDINGEXC+4
 
     # Check if it's a MOVE. MOVE has 2 EAs and we need to understand whether
-    # the read part of the write part is responsible for the address error.
+    # the read part or the write part is responsible for the address error.
     lw_m64k t0, M64K_OFF_IR       # Check original opcode
     andi t0, 0xC000
     beqz t0, addrerr_fixup_move   # Fixup for MOVE post-decrement
@@ -292,6 +317,8 @@ compute_fc:
     # Check if we need fixups
     andi t0, opcode, 0xF138              # Fixup for ADDX pre-decrement
     beq t0, 0xD108, addrerr_fixup_addq
+    andi t0, opcode, 0xFFC0
+    beq t0, 0x40C0, addrerr_fixup_mvfsr
     j main_loop_exit
 
 addrerr_fixup_addq:
@@ -412,8 +439,24 @@ addrerr_fixup_move_longabs2:
     addi m_pc, 2
     j main_loop_exit
 
+addrerr_fixup_mvfsr:
+    lw_m64k t0, M64K_OFF_PENDINGEXC+8  # read FC
+    ori t0, 0x10
+    sw_m64k t0, M64K_OFF_PENDINGEXC+8  # write FC
+    j main_loop_exit
+
     .set noreorder
 #endif
+
+
+###############################################################
+# Other errors
+###############################################################
+
+privilege_violation_error:
+    move a0, opcode
+    jal __m64k_assert_privilege_violation
+    addiu a1, m_pc, -2
 
 
 ###############################################################
@@ -892,12 +935,74 @@ OP(movea32):
     j main_loop
     .set noreorder
 
+OP(mvfsr):
+    .set reorder
+    li opsize, 2
+    jal decode_ea
+    check_addr_error eaptr32, write_address_error
+    jal flush_sr
+    sh t1, 0(eaptr)
+    j main_loop
+    .set noreorder
 
-                                        op4_0100: op4_0101: op4_0110: op4_0111:
-op4_1000: op4_1001: op4_1010: op4_1011:           op4_1101: op4_1110: op4_1111:
+OP(mvccr):
+    .set reorder
+    li opsize, 2
+    jal decode_ea
+    check_addr_error eaptr32, read_address_error
+    jal flush_sr
+    lw_m64k t1, M64K_OFF_SR
+    lhu t0, 0(eaptr)
+    and t1, 0xA700
+    and t0, 0x1F
+    or t0, t1
+    sw_m64k t0, M64K_OFF_SR
+    jal reload_sr
+    j main_loop
+    .set noreorder
+
+OP(mvtsr):
+    .set reorder
+    li opsize, 2
+    jal decode_ea
+    check_addr_error eaptr32, read_address_error
+    jal flush_sr
+    lhu t0, 0(eaptr)
+    and t0, 0xA71F
+    sw_m64k t0, M64K_OFF_SR
+    jal reload_sr
+    j main_loop
+    .set noreorder
+
+OP(mvusp):
+    .set reorder
+    lw_m64k t0, M64K_OFF_SR    # Read current SR
+    andi t0, 0x2000            # Check supervisor bit
+    beqz t0, privilege_violation_error
+    andi t0, opcode, 8         # DR bit
+    sll t1, opcode, 2          # Isolate register offset
+    andi t1, 0x7<<2
+    bnez t0, mvusp_read        # See if it's read or write
+    lw_m64k t2, M64K_OFF_AREGS,t1
+    sw_m64k t2, M64K_OFF_USP
+    j main_loop
+mvusp_read:
+    lw_m64k t2, M64K_OFF_USP
+    sw_m64k t2, M64K_OFF_AREGS,t1
+    j main_loop
+
+    .set noreorder
+
+
+
+                                        op0_0100: op0_0101: op0_0110: op0_0111:
+op0_1000: op0_1001: op0_1010: op0_1011:           op0_1101: op0_1110: op0_1111:
 
 op8_0000: op8_0001:           op8_0011: op8_0100: op8_0101: op8_0110: op8_0111:
 op8_1000: op8_1001: op8_1010: op8_1011: op8_1100: op8_1101: op8_1110: op8_1111:
+
+op4_0000: op4_0001: op4_0010: op4_0011: op4_0100: op4_0101: op4_0110: op4_0111:
+op4_1000: op4_1001: op4_1010: op4_1011: op4_1100: op4_1101: op4_1110: op4_1111:
 
     move a0, opcode
     jal __m64k_assert_invalid_opcode

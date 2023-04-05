@@ -31,6 +31,10 @@ void __m64k_assert_invalid_ea(uint16_t opcode, uint32_t pc) {
     assertf(0, "Invalid EA: %04x @ %08lx", opcode, pc);
 }
 
+void __m64k_assert_privilege_violation(uint16_t opcode, uint32_t pc) {
+    assertf(0, "unimplemented: privilege violation error: %04x @ %08lx", opcode, pc);
+}
+
 static inline void exc_push32(m64k_t *m64k, uint32_t v)
 {
     m64k->ssp -= 4;
