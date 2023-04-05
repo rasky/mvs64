@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 type M68kState struct {
@@ -109,9 +110,15 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	var wg sync.WaitGroup
 	for _, fn := range files {
-		tests := readTests(fn)
-		fn = fn[:len(fn)-len(".json.gz")] + ".btest"
-		writeTests(fn, tests)
+		wg.Add(1)
+		go func(fn string) {
+			defer wg.Done()
+			tests := readTests(fn)
+			fn = fn[:len(fn)-len(".json.gz")] + ".btest"
+			writeTests(fn, tests)
+		}(fn)
 	}
+	wg.Wait()
 }
