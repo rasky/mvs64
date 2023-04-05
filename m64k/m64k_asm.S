@@ -50,7 +50,7 @@
 pc_diff:      .long 0
 
 optable0:
-    .long   op_tbl2,  op_moveb, op_movel, op_movew, op4_0100, op_addq,  op4_0110, op4_0111
+    .long   op_tbl2,  op_moveb, op_movel, op_movew, op4_0100, op_addq,  op4_0110, op_moveq
     .long   op4_1000, op4_1001, op4_1010, op4_1011, op_and,   op_add,   op4_1110, op4_1111
 optable1:
     .long   op8_0000, op8_0001, op_andi,  op8_0011, op8_0100, op8_0101, op_addi,  op8_0111
@@ -829,6 +829,8 @@ OP(movew):
     li opsize, 2
     jal decode_ea
     check_addr_error eaptr32, read_address_error
+    and t0, opcode, 0x1C0
+    beq t0, 0x040, op_movea16
     lhu flag_zc, 0(eaptr)           # read word; this is already good as flag_zc (as C is always cleared)
     sll flag_nv, flag_zc, 16        # flag_nv is the sign extension of the 16 bit value
     srl opcode, 3                   # move the EA dst mode into the EA src mode field
@@ -845,6 +847,8 @@ OP(movel):
     li opsize, 4
     jal decode_ea
     check_addr_error eaptr32, read_address_error
+    and t0, opcode, 0x1C0
+    beq t0, 0x040, op_movea32
     lwl flag_nv, 0(eaptr)           # read unaligned 32-bit word (sign-extended)
     lwr flag_nv, 3(eaptr)           # (it is already good as flag_nv, so store it there).
     zx64 flag_zc, flag_nv           # flag_zc is the zero-extended copy (as C is always cleared)
@@ -858,6 +862,35 @@ OP(movel):
     j main_loop
     .set noreorder
 
+OP(moveq):
+    .set reorder
+    sll flag_nv, opcode, 24
+    sra flag_nv, 24
+    andi flag_zc, opcode, 0xFF
+    srl t1, opcode, 7
+    andi t1, 0x7 << 2
+    sw_m64k flag_nv, M64K_OFF_DREGS,t1
+    j main_loop
+    .set noreorder
+
+OP(movea16):
+    .set reorder
+    lh t1, 0(eaptr)
+    srl t0, opcode, 7
+    andi t0, 0x7<<2
+    sw_m64k t1, M64K_OFF_AREGS,t0
+    j main_loop
+    .set noreorder
+
+OP(movea32):
+    .set reorder
+    lwl t1, 0(eaptr)
+    lwr t1, 3(eaptr)
+    srl t0, opcode, 7
+    andi t0, 0x7<<2
+    sw_m64k t1, M64K_OFF_AREGS,t0
+    j main_loop
+    .set noreorder
 
 
                                         op4_0100: op4_0101: op4_0110: op4_0111:

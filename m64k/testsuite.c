@@ -218,6 +218,8 @@ int main()
         "rom:/MOVE.w.btest",
         "rom:/MOVE.l.btest",
         // "rom:/MOVE.q.btest",
+        "rom:/MOVEA.w.btest",
+        "rom:/MOVEA.l.btest",
     };
     int num_tests = sizeof(testfns)/sizeof(testfns[0]);
 #endif
