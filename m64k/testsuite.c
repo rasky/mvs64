@@ -154,6 +154,10 @@ void run_testsuite(const char *fn)
             debugf("SR: %08lx != %08lx\n", m64k.sr, final.sr);
             failed = true;
         }
+        if (m64k.pc != final.pc) {
+            debugf("PC: %08lx != %08lx\n", m64k.pc, final.pc);
+            failed = true;
+        }
         for (int i=0; i<final.nrams; i++) {
             uint8_t got = m68k_ram_r8(final.ram[i][0]);
             if (got != final.ram[i][1]) {
@@ -199,17 +203,21 @@ int main()
 	}
 #else
     static const char *testfns[] = {
-        // "rom:/AND.b.btest",
-        // "rom:/AND.l.btest",
-        // "rom:/AND.w.btest",
-        // "rom:/ADD.b.btest",
-        // "rom:/ADD.l.btest",
-        // "rom:/ADD.w.btest",
+        "rom:/AND.b.btest",
+        "rom:/AND.l.btest",
+        "rom:/AND.w.btest",
+        "rom:/ADD.b.btest",
+        "rom:/ADD.l.btest",
+        "rom:/ADD.w.btest",
         "rom:/ADDX.b.btest",
         "rom:/ADDX.l.btest",
         "rom:/ADDX.w.btest",
         "rom:/ADDA.l.btest",
         "rom:/ADDA.w.btest",
+        "rom:/MOVE.b.btest",
+        "rom:/MOVE.w.btest",
+        "rom:/MOVE.l.btest",
+        // "rom:/MOVE.q.btest",
     };
     int num_tests = sizeof(testfns)/sizeof(testfns[0]);
 #endif

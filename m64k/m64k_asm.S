@@ -353,6 +353,7 @@ addrerr_fixup_move_dst:
     andi t0, opcode, 0x7 << 6
     beq t0, 2<<6, addrerr_fixup_move_areg      # (An)
     beq t0, 3<<6, addrerr_fixup_move_postincr  # (An)+
+    beq t0, 4<<6, addrerr_fixup_move_predecr   # -(An)
     beq t0, 5<<6, addrerr_fixup_move_disp16    # (d16,An)
     beq t0, 6<<6, addrerr_fixup_move_disp8     # (d8,An,Xn)
 
@@ -373,6 +374,19 @@ addrerr_fixup_move_postincr: # (An)+
     sub t0, opsize
     sw t0, 0(t1)
     addi m_pc, -2                      # Adjust PC
+    j main_loop_exit
+
+addrerr_fixup_move_predecr: # -(An)
+    bne opsize, 4, main_loop_exit      # 16-bit: no fixup
+    srl t0, opcode, 7                  # Extract An register number
+    andi t0, 0x7 << 2
+    la_m64k t1, M64K_OFF_AREGS,t0      # Revert half of the pre-decrement
+    lw t0, 0(t1)
+    add t0, 2
+    sw t0, 0(t1)
+    lw_m64k t0, M64K_OFF_PENDINGEXC+4  # Adjust also the exception address
+    add t0, 2
+    sw_m64k t0, M64K_OFF_PENDINGEXC+4
     j main_loop_exit
 
 addrerr_fixup_move_areg:    # (An)
@@ -555,9 +569,10 @@ ea7_010: # (d16,PC)
 ea7_100: # #<data>
     move eaptr32, m_pc
     decode_opsize
-    addi m_pc, 2
+    add m_pc, opsize
     bne opsize, 1, 1f
     addi eaptr32, 1           # if opsize is byte, skip a byte
+    addi m_pc, 1
 1:
     map_m68k eaptr, eaptr32
     jr ra
@@ -814,21 +829,34 @@ OP(movew):
     li opsize, 2
     jal decode_ea
     check_addr_error eaptr32, read_address_error
-    lhu result, 0(eaptr)
-    srl opcode, 3
-    srl t1, opcode, 6
+    lhu flag_zc, 0(eaptr)           # read word; this is already good as flag_zc (as C is always cleared)
+    sll flag_nv, flag_zc, 16        # flag_nv is the sign extension of the 16 bit value
+    srl opcode, 3                   # move the EA dst mode into the EA src mode field
+    srl t1, opcode, 6               # decode the EA dst register
     andi t1, 7
-    move flag_zc, result
-    sll flag_nv, flag_zc, 16
-    jal decode_ea_customreg
+    jal decode_ea_customreg         # decode dst EA
     check_addr_error eaptr32, write_address_error
-    sh result, 0(eaptr)
+    sh flag_zc, 0(eaptr)             # store the word into the destination
     j main_loop
     .set noreorder
 
-
-
 OP(movel):
+    .set reorder
+    li opsize, 4
+    jal decode_ea
+    check_addr_error eaptr32, read_address_error
+    lwl flag_nv, 0(eaptr)           # read unaligned 32-bit word (sign-extended)
+    lwr flag_nv, 3(eaptr)           # (it is already good as flag_nv, so store it there).
+    zx64 flag_zc, flag_nv           # flag_zc is the zero-extended copy (as C is always cleared)
+    srl opcode, 3
+    srl t1, opcode, 6
+    andi t1, 7
+    jal decode_ea_customreg
+    check_addr_error eaptr32, write_address_error
+    swl flag_nv, 0(eaptr)
+    swr flag_nv, 3(eaptr)
+    j main_loop
+    .set noreorder
 
 
 
