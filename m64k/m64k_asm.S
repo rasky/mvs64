@@ -50,7 +50,7 @@
 pc_diff:      .long 0
 
 optable0:
-    .long   op4_0000, op4_0001, op4_0010, op4_0011, op4_0100, op_addq,  op4_0110, op4_0111
+    .long   op_tbl2,  op_moveb, op_movel, op_movew, op4_0100, op_addq,  op4_0110, op4_0111
     .long   op4_1000, op4_1001, op4_1010, op4_1011, op_and,   op_add,   op4_1110, op4_1111
 optable1:
     .long   op8_0000, op8_0001, op_andi,  op8_0011, op8_0100, op8_0101, op_addi,  op8_0111
@@ -162,7 +162,7 @@ main_loop:
     addi m_pc, 2
     jr t0
     sub m_cycles, t1
-op4_0000:
+op_tbl2:
     srl t0, opcode, 6
     andi t0, 0xF << 2
     lw t0, optable1(t0)
@@ -224,6 +224,20 @@ main_loop_exit:
 ###############################################################
 # Address error handling
 ###############################################################
+#
+# Address errors require quite some code to exactly match the
+# state of the processor at the time they are generated. In fact,
+# they happen mid-instructions, but the interpreter favors speed
+# and code size and doesn't bother to generate them with a consistent
+# state. An example is moves to a post-increment address: if the
+# write happens to cause an address error, the address register is
+# supposedely not incremented yet, but in our interpreter we raise
+# the address error after the increment has happened.
+# 
+# So in general, we need to perform several fixups here, including
+# instruction-specific ones. We don't care if this is slow as
+# address errors are *extremely* rare in 68000 code, so it is a super
+# cold path.
 
 #if M64K_CONFIG_ADDRERR
     .data 
@@ -235,17 +249,26 @@ addrerr7_pcoff: .byte -2,5, -2,5, -2,5, -2,5,  0,0,  0,0,  0,0,  0,0
 
     .text
     .set reorder
-read_address_error_exit:
+read_address_error:
     li t2, 1<<4
-    j address_error_exit
-write_address_error_exit:
+    j address_error
+write_address_error:
     li t2, 0
-address_error_exit:
+address_error:
     li t0, M64K_PENDINGEXC_ADDRERR
     sw_m64k t0, M64K_OFF_PENDINGEXC+0
     sw_m64k eaptr32, M64K_OFF_PENDINGEXC+4
-addrerr_fetch_pcoff:
-    # Compute PC offset and FC code
+
+    # Check if it's a MOVE. MOVE has 2 EAs and we need to understand whether
+    # the read part of the write part is responsible for the address error.
+    lw_m64k t0, M64K_OFF_IR       # Check original opcode
+    andi t0, 0xC000
+    beqz t0, addrerr_fixup_move   # Fixup for MOVE post-decrement
+
+addrerr_fixup_ea:
+    # Compute PC offset and FC code from the opcode. Notice that we used the
+    # "current" opcode that might have been modified by the handler to force
+    # a specific EA mode; but this is exactly the one that we should be parsing here.
     # Fetch the PC/FC table entry using EA
     srl t0, opcode, 2
     andi t0, 0x7<<1
@@ -260,15 +283,14 @@ compute_fc:
     lb t0, 0(t1)                         # PC offset
     lbu t1, 1(t1)                        # FC code
     add m_pc, t0                         # Rollback PC
-    lw opcode, M64K_OFF_IR(m64k)         # Restore original opcode
+    lw_m64k opcode, M64K_OFF_IR          # Restore original opcode
     andi t0, opcode, 0xFFE0
     or t0, t1                            # Merge FC (4 bits) with opcode
     or t0, t2                            # Merge read/write flag
     sw_m64k t0, M64K_OFF_PENDINGEXC+8    # Store FC
 
     # Check if we need fixups
-    # Fixup for ADDX pre-decrement
-    andi t0, opcode, 0xF138
+    andi t0, opcode, 0xF138              # Fixup for ADDX pre-decrement
     beq t0, 0xD108, addrerr_fixup_addq
     j main_loop_exit
 
@@ -309,9 +331,72 @@ addrerr_fixup_addq:
     sw t0, 0(rhs)                      # write RHS
     sw_m64k t0, M64K_OFF_PENDINGEXC+4  # store RHS as address error
     j main_loop_exit
-
     #undef lhs
     #undef rhs
+
+addrerr_fixup_move:
+    andi t2, 1<<4                      # Check if it's a read
+    bnez t2, addrerr_fixup_ea          # If it's a read, do the standard EA fixup
+
+    # This is a write exception. We must do fixup based *mainly* on the
+    # destination EA, but there are some cases in which the source EA also
+    # affects the stack frame.
+
+    # Restore original opcode and prepare standard FC code.
+    lw_m64k opcode, M64K_OFF_IR
+    andi t0, opcode, 0xFFE0
+    or t0, 0x5
+    sw_m64k t0, M64K_OFF_PENDINGEXC+8    # Store FC
+
+addrerr_fixup_move_dst:
+    # Check destination EA
+    andi t0, opcode, 0x7 << 6
+    beq t0, 2<<6, addrerr_fixup_move_areg      # (An)
+    beq t0, 3<<6, addrerr_fixup_move_postincr  # (An)+
+    beq t0, 5<<6, addrerr_fixup_move_disp16    # (d16,An)
+    beq t0, 6<<6, addrerr_fixup_move_disp8     # (d8,An,Xn)
+
+    andi t0, opcode, 0x3F << 6
+    beq t0, 0x07<<6, addrerr_fixup_move_wordabs  # (xxx).W
+    beq t0, 0x0F<<6, addrerr_fixup_move_longabs  # (xxx).L
+
+1:  j main_loop_exit
+
+    add m_pc, -2
+    j main_loop_exit
+
+addrerr_fixup_move_postincr: # (An)+
+    srl t0, opcode, 7                  # Extract An register number
+    andi t0, 0x7 << 2
+    la_m64k t1, M64K_OFF_AREGS,t0      # Revert the post-increment
+    lw t0, 0(t1)
+    sub t0, opsize
+    sw t0, 0(t1)
+    addi m_pc, -2                      # Adjust PC
+    j main_loop_exit
+
+addrerr_fixup_move_areg:    # (An)
+addrerr_fixup_move_disp8:   # (d8,An,Xn)
+addrerr_fixup_move_disp16:  # (d16,An)
+addrerr_fixup_move_wordabs: # (xxx).W
+    addi m_pc, -2
+    j main_loop_exit
+
+addrerr_fixup_move_longabs: # (xxx).L
+    addi m_pc, -4
+
+    # Check source EA. It has an impact has the (xxx.L) decoding of dest 
+    # is partly overlap to EA source. We check for the source EA mode
+    # that don't access memory.
+    andi t0, opcode, 0x38
+    beq t0, 0b000000, addrerr_fixup_move_longabs2    # Dn
+    beq t0, 0b001000, addrerr_fixup_move_longabs2    # An
+    andi t0, opcode, 0x3F
+    beq t0, 0b111100, addrerr_fixup_move_longabs2    # #<data>
+    j main_loop_exit
+addrerr_fixup_move_longabs2:
+    addi m_pc, 2
+    j main_loop_exit
 
     .set noreorder
 #endif
@@ -469,9 +554,9 @@ ea7_010: # (d16,PC)
     jr ra
 ea7_100: # #<data>
     move eaptr32, m_pc
-    and t0, opcode, 0xC0   # isolate opsize in opcode
+    decode_opsize
     addi m_pc, 2
-    bnez t0, 1f
+    bne opsize, 1, 1f
     addi eaptr32, 1           # if opsize is byte, skip a byte
 1:
     map_m68k eaptr, eaptr32
@@ -519,7 +604,7 @@ rmw8_easrc:
     sb result, 3(dptr)
     j main_loop
 rmw16_easrc:
-    check_addr_error eaptr32, read_address_error_exit
+    check_addr_error eaptr32, read_address_error
     li flag_bitsize, 16
     lhu t0, 0(eaptr)
     lhu t1, 2(dptr)
@@ -527,7 +612,7 @@ rmw16_easrc:
     sh result, 2(dptr)
     j main_loop
 rmw32_easrc:
-    check_addr_error eaptr32, read_address_error_exit
+    check_addr_error eaptr32, read_address_error
     li flag_bitsize, 0
     lwl t0, 0(eaptr)
     lwr t0, 3(eaptr)
@@ -544,7 +629,7 @@ rmw8_eadst:
     sb result, 0(eaptr)
     j main_loop
 rmw16_eadst:
-    check_addr_error eaptr32, read_address_error_exit
+    check_addr_error eaptr32, read_address_error
     li flag_bitsize, 16
     lhu t1, 2(dptr)
     lhu t0, 0(eaptr)
@@ -552,7 +637,7 @@ rmw16_eadst:
     sh result, 0(eaptr)
     j main_loop
 rmw32_eadst:
-    check_addr_error eaptr32, read_address_error_exit
+    check_addr_error eaptr32, read_address_error
     li flag_bitsize, 0
     lwl t1, 0(dptr)   # NOTE: this is to handle immediate case (where dptr is PC-relative)
     lwr t1, 3(dptr)
@@ -635,7 +720,7 @@ op_addx_addr:
     jal ea_100                   # decode Rx as pre-decrement address register
     #if M64K_CONFIG_ADDRERR
     beq opsize, 1, 1f
-    check_addr_error eaptr32, read_address_error_exit
+    check_addr_error eaptr32, read_address_error
     #endif
 1:  xori opcode, 0x28            # force EA mode to predecrement
     j op_addx_finish
@@ -710,8 +795,44 @@ op_and_rmwimpl:
     jr ra
     .set noreorder
 
+OP(moveb):
+    .set reorder
+    li opsize, 1
+    jal decode_ea
+    lbu flag_zc, 0(eaptr)
+    srl opcode, 3
+    srl t1, opcode, 6
+    andi t1, 7
+    jal decode_ea_customreg
+    sb flag_zc, 0(eaptr)
+    sll flag_nv, flag_zc, 24
+    j main_loop
+    .set noreorder
 
-          op4_0001: op4_0010: op4_0011: op4_0100: op4_0101: op4_0110: op4_0111:
+OP(movew):
+    .set reorder
+    li opsize, 2
+    jal decode_ea
+    check_addr_error eaptr32, read_address_error
+    lhu result, 0(eaptr)
+    srl opcode, 3
+    srl t1, opcode, 6
+    andi t1, 7
+    move flag_zc, result
+    sll flag_nv, flag_zc, 16
+    jal decode_ea_customreg
+    check_addr_error eaptr32, write_address_error
+    sh result, 0(eaptr)
+    j main_loop
+    .set noreorder
+
+
+
+OP(movel):
+
+
+
+                                        op4_0100: op4_0101: op4_0110: op4_0111:
 op4_1000: op4_1001: op4_1010: op4_1011:           op4_1101: op4_1110: op4_1111:
 
 op8_0000: op8_0001:           op8_0011: op8_0100: op8_0101: op8_0110: op8_0111:
