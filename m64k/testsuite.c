@@ -206,6 +206,13 @@ int main()
         "rom:/AND.b.btest",
         "rom:/AND.l.btest",
         "rom:/AND.w.btest",
+        "rom:/OR.b.btest",
+        "rom:/OR.l.btest",
+        "rom:/OR.w.btest",
+        "rom:/EOR.b.btest",
+        "rom:/EOR.l.btest",
+        "rom:/EOR.w.btest",
+
         "rom:/ADD.b.btest",
         "rom:/ADD.l.btest",
         "rom:/ADD.w.btest",

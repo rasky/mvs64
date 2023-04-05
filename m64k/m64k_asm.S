@@ -4,12 +4,21 @@
 
     .set noreorder
 
-.macro jal_and_j func, label
-    lui ra, %hi(\label)
-    j \func
-    addi ra, %lo(\label)
+# "lal" macro. Similar to "la" but only support loading a label address.
+# This allows the gas reorder engine to work better.
+.macro lal reg, label
+    lui \reg, %hi(\label)
+    addi \reg, %lo(\label)
 .endm
 
+# "jal_and_j" macro. Compact version of "jal" followed by "j", with a tail-call
+# for optimal icache usage.
+.macro jal_and_j func, label
+    lal ra, \label
+    j \func
+.endm
+
+# "zx64" macro. Zero-extend a 32-bit value to 64-bit.
 .macro zx64 dst, src
     .ifnb \src
     dsll \dst, \src, 32
@@ -51,10 +60,10 @@ pc_diff:      .long 0
 
 optable0:
     .long   op_tbl8,  op_moveb, op_movel, op_movew, op_tbl4,  op_addq,  op0_0110, op_moveq
-    .long   op0_1000, op0_1001, op0_1010, op0_1011, op_and,   op_add,   op0_1110, op0_1111
+    .long   op_or,    op0_1001, op0_1010, op_eor,   op_and,   op_add,   op0_1110, op0_1111
 optable8:
-    .long   op8_0000, op8_0001, op_andi,  op8_0011, op8_0100, op8_0101, op_addi,  op8_0111
-    .long   op8_1000, op8_1001, op8_1010, op8_1011, op8_1100, op8_1101, op8_1110, op8_1111
+    .long   op_ori,   op8_0001, op_andi,  op8_0011, op8_0100, op8_0101, op_addi,  op8_0111
+    .long   op8_1000, op8_1001, op_eori,  op8_1011, op8_1100, op8_1101, op8_1110, op8_1111
 optable4:
     .long   op_mvfsr, op4_0001, op4_0010, op4_0011, op_mvccr, op4_0101, op_mvtsr, op4_0111
     .long   op4_1000, op4_1001, op4_1010, op4_1011, op4_1100, op4_1101, op_mvusp, op4_1111
@@ -739,14 +748,14 @@ op_addq_rmwimpl:
 
 OP(addi):
     .set reorder
-    la rmw_op, op_add_rmwimpl
+    lal rmw_op, op_add_rmwimpl
     jal decode_imm
     ori opcode, 1<<8    # force rmw with eadst
     j rmw
     nop
 OP(add):
     # check if the opcode is addx instead
-    la rmw_op, op_add_rmwimpl
+    lal rmw_op, op_add_rmwimpl
     srl dptr, opcode, 7       # get data register pointer
     andi dptr, 0x7 << 2       # isolate data register pointer
     la_m64k dptr, M64K_OFF_DREGS,dptr
@@ -769,7 +778,7 @@ op_add_rmwimpl:
 
 OP(addx):
     .set reorder
-    la rmw_op, op_addx_rmwimpl
+    lal rmw_op, op_addx_rmwimpl
     andi t0, opcode, 0x8         # isolate R/M bit
     andi t1, opcode, 0x7         # extract Ry*4
     sll t1, 2
@@ -830,28 +839,62 @@ op_adda32_rmwimpl:
     .set noreorder
 
 
-OP(andi):
-    ori opcode, 1<<8    # force rmw with eadst
-    jal_and_j decode_imm, op_and_body
-OP(and):
+OP(group_logical):
+    .set reorder
     srl dptr, opcode, 7       # get data register pointer
     andi dptr, 0x7 << 2
     la_m64k dptr, M64K_OFF_DREGS,dptr
     li opsize, 0
-op_and_body:
-    jal decode_ea             # get EA pointer
-    nop
-    
-    srl t0, opcode, 4         # do RMW
-    andi t0, 0x7 << 2
-    rmw t0, op_and_rmwimpl
-op_and_rmwimpl:
+    j rmw
+    .set noreorder
+
+OP(andi):
     .set reorder
+    ori opcode, 1<<8    # force rmw with eadst
+    lal rmw_op, op_and_rmwimpl
+    jal_and_j decode_imm, rmw
+OP(and):
+    lal rmw_op, op_and_rmwimpl
+    j op_group_logical
+op_and_rmwimpl:
     and result, t0, t1
     sllv flag_nv, result, flag_bitsize
     zx64 flag_zc, flag_nv
     jr ra
     .set noreorder
+
+OP(ori):
+    .set reorder
+    ori opcode, 1<<8    # force rmw with eadst
+    lal rmw_op, op_or_rmwimpl
+    jal_and_j decode_imm, rmw
+OP(or):
+    lal rmw_op, op_or_rmwimpl
+    j op_group_logical
+op_or_rmwimpl:
+    or result, t0, t1
+    sllv flag_nv, result, flag_bitsize
+    zx64 flag_zc, flag_nv
+    jr ra
+    .set noreorder
+
+OP(eori):
+    .set reorder
+    ori opcode, 1<<8    # force rmw with eadst
+    lal rmw_op, op_eor_rmwimpl
+    jal_and_j decode_imm, rmw
+OP(eor):
+    lal rmw_op, op_eor_rmwimpl
+    j op_group_logical
+op_eor_rmwimpl:
+    xor result, t0, t1
+    sllv flag_nv, result, flag_bitsize
+    zx64 flag_zc, flag_nv
+    jr ra
+    .set noreorder
+
+
+
 
 OP(moveb):
     .set reorder
