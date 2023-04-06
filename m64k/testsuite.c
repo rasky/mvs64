@@ -78,6 +78,9 @@ void run_testsuite(const char *fn)
     debugf("Running testsuite: %s\n", fn);
     FILE *f = asset_fopen(fn);
 
+    bool asl_test = strstr(fn, "ASL.b.") != NULL;
+    bool asr_test = strstr(fn, "ASR.b.") != NULL;
+
     // Read ID
     char id[4]; fread(id, 1, 4, f); (void)id;
     assert(id[0] == 'M' && id[1] == '6' && id[2] == '4' && id[3] == 'K');
@@ -96,7 +99,10 @@ void run_testsuite(const char *fn)
         read_state(f, &initial);
         read_state(f, &final);
 
-        // if(t!=62-1) continue;
+        // skip buggy tests
+        // see https://github.com/TomHarte/ProcessorTests/issues/21
+        if (asl_test && (t == 1583-1 || t == 1761-1)) continue;
+        if (asr_test && t == 8-1) continue;
         debugf("Running test: %s\n", name);
 
         // Run the test
@@ -213,6 +219,9 @@ int main()
         "rom:/EOR.l.btest",
         "rom:/EOR.w.btest",
 
+        "rom:/ASL.b.btest",
+        "rom:/ASL.l.btest",
+        "rom:/ASL.w.btest",
         "rom:/ADD.b.btest",
         "rom:/ADD.l.btest",
         "rom:/ADD.w.btest",

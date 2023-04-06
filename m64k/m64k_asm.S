@@ -4,30 +4,6 @@
 
     .set noreorder
 
-# "lal" macro. Similar to "la" but only support loading a label address.
-# This allows the gas reorder engine to work better.
-.macro lal reg, label
-    lui \reg, %hi(\label)
-    addi \reg, %lo(\label)
-.endm
-
-# "jal_and_j" macro. Compact version of "jal" followed by "j", with a tail-call
-# for optimal icache usage.
-.macro jal_and_j func, label
-    lal ra, \label
-    j \func
-.endm
-
-# "zx64" macro. Zero-extend a 32-bit value to 64-bit.
-.macro zx64 dst, src
-    .ifnb \src
-    dsll \dst, \src, 32
-    .else
-    dsll \dst, 32
-    .endif
-    dsrl \dst, 32
-.endm
-
 # Currently, we use TLBs for memory accesses, so we can access
 # the 68k memory map directly.
 .macro map_m68k reg, src
@@ -60,19 +36,28 @@ pc_diff:      .long 0
 
 optable0:
     .long   op_tbl8,  op_moveb, op_movel, op_movew, op_tbl4,  op_addq,  op0_0110, op_moveq
-    .long   op_or,    op0_1001, op0_1010, op_eor,   op_and,   op_add,   op0_1110, op0_1111
+    .long   op_or,    op0_1001, op0_1010, op_eor,   op_and,   op_add,   op_bits,  op0_1111
 optable8:
     .long   op_ori,   op8_0001, op_andi,  op8_0011, op8_0100, op8_0101, op_addi,  op8_0111
     .long   op8_1000, op8_1001, op_eori,  op8_1011, op8_1100, op8_1101, op8_1110, op8_1111
 optable4:
     .long   op_mvfsr, op4_0001, op4_0010, op4_0011, op_mvccr, op4_0101, op_mvtsr, op4_0111
     .long   op4_1000, op4_1001, op4_1010, op4_1011, op4_1100, op4_1101, op_mvusp, op4_1111
+opbits:
+    .long   op_asli,  op_lsli,  opb_010,  opb_011
+    .long   op_asl,   op_lsl,   opb_110,  opb_111
+opbitsmem:
+    .long   op_aslm,  op_asrm,  op_lslm,  op_lsrm,  opm_0100, opm_0101, opm_0110, opm_0101
+    .long   opm_1000, opm_1001, opm_1010, opm_1011, opm_1100, opm_1101, opm_1110, opm_1111
 
     .text
 
 #define OP(x)       .balign 32; op_##x
 #define m64k        a0
 #define m_cycles    a1    // cycles to execute (NOTE: must be kept caller-saved register)
+
+#define lax_base    v0
+#define zx64_mask   v1
 
 #define opcode      s0
 #define eaptr       s1
@@ -81,7 +66,7 @@ optable4:
 #define result      s5
 #define flag_nv     s6    // bit 31: N; bit 63: N^V
 #define flag_zc     s7    // bit 0..31: !Z; bit 32: C
-#define flag_x      s8    // bit 0..31: X
+#define flag_x      s8    // bit 0: X
 
 #define eaptr32       t4
 #define m_pc          t5
@@ -118,6 +103,28 @@ optable4:
     .endif
 .endm
 
+#define LAX_BASE_ADDR main_loop
+
+.macro lax reg, label
+    addiu \reg, lax_base, \label - LAX_BASE_ADDR
+.endm
+
+# "zx64" macro. Zero-extend a 32-bit value to 64-bit.
+.macro zx64 dst, src
+    .ifnb \src
+    and \dst, \src, zx64_mask
+    .else
+    and \dst, zx64_mask
+    .endif
+.endm
+
+# "jal_and_j" macro. Compact version of "jal" followed by "j", with a tail-call
+# for optimal icache usage.
+.macro jal_and_j func, label
+    lax ra, \label
+    j \func
+.endm
+
     .globl _m64k_asmrun
 _m64k_asmrun:
     addiu sp,sp,-128
@@ -132,6 +139,8 @@ _m64k_asmrun:
     sd s8,96(sp)
     sd ra,104(sp)
 
+    la lax_base, LAX_BASE_ADDR
+    dli zx64_mask, 0x00000000FFFFFFFF
     la m_cyc_table, __m64k_cycle_table
     lw t1, M64K_OFF_PC(m64k)
     lw t0, M64K_OFF_SR(m64k)
@@ -164,12 +173,26 @@ op_tbl8:
     lw t0, optable8(t0)
     jr t0
     nop
-op_tbl4:
+OP(tbl4):
     srl t0, opcode, 6
     andi t0, 0xF << 2
     lw t0, optable4(t0)
     jr t0
     nop
+OP(bits):
+    andi t0, opcode, 0x3<<6
+    beq t0, 0x3<<6, 1f
+    srl t0, opcode, 1
+    andi t0, 0x7<<2
+    lw t0, opbits(t0)
+    jr t0
+    li opsize, 0
+1:  srl t0, opcode, 6
+    andi t0, 0xF<<2
+    lw t0, opbitsmem(t0)
+    jr t0
+    li opsize, 2
+
 
 main_loop_exit:
     lw t0, pc_diff
@@ -213,9 +236,9 @@ flush_sr:
     sll t1, 2
     or t0, t1
 
-    sne flag_x, zero, flag_x
-    sll flag_x, 4
-    or t0, flag_x
+    andi flag_x, 1
+    sll t1, flag_x, 4
+    or t0, t1
     
     lw t1, M64K_OFF_SR(m64k)
     and t1, ~0x1f
@@ -500,7 +523,7 @@ imm_8:
 # EA computation
 ###############################################################
 
-    .data
+    .sdata
 ea_table:
     .long   ea_000, ea_001, ea_010, ea_011, ea_100, ea_101, ea_110, ea_111
 ea7_table:
@@ -639,14 +662,6 @@ ea7_101: ea7_110: ea7_111:
 # RMW accesses
 ###############################################################
 
-.macro rmw opmode, opfunc
-    .set reorder
-    lw t0, rmw_table(\opmode)
-    la rmw_op, \opfunc
-    jr t0
-    .set noreorder
-.endm
-
     .data
 rmw_table:
     .long   rmw8_easrc, rmw16_easrc, rmw32_easrc, invalid_opmode
@@ -728,7 +743,7 @@ invalid_opmode:
 ###############################################################
 
 OP(addq):
-    la rmw_op, op_addq_rmwimpl
+    lax rmw_op, op_addq_rmwimpl
     srl t1, opcode, 9   # extract immediate value
     andi t1, 0x7
     bnez t1, 1f         # if immediate is not 0, skip
@@ -748,14 +763,14 @@ op_addq_rmwimpl:
 
 OP(addi):
     .set reorder
-    lal rmw_op, op_add_rmwimpl
+    lax rmw_op, op_add_rmwimpl
     jal decode_imm
     ori opcode, 1<<8    # force rmw with eadst
     j rmw
     nop
 OP(add):
     # check if the opcode is addx instead
-    lal rmw_op, op_add_rmwimpl
+    lax rmw_op, op_add_rmwimpl
     srl dptr, opcode, 7       # get data register pointer
     andi dptr, 0x7 << 2       # isolate data register pointer
     la_m64k dptr, M64K_OFF_DREGS,dptr
@@ -778,7 +793,7 @@ op_add_rmwimpl:
 
 OP(addx):
     .set reorder
-    lal rmw_op, op_addx_rmwimpl
+    lax rmw_op, op_addx_rmwimpl
     andi t0, opcode, 0x8         # isolate R/M bit
     andi t1, opcode, 0x7         # extract Ry*4
     sll t1, 2
@@ -801,7 +816,7 @@ op_addx_finish:
     addi dptr, -4                # finish adjusting dptr (so that rmw does the right thing)
     j rmw_no_ea
 op_addx_rmwimpl:
-    sne flag_x, 0                        # set flag_x to 0/1
+    andi flag_x, 1                       # isolate flag_x to 0/1
     zx64 t2, flag_zc                     # put current Z flag (without C) into t2
     daddu result, t0, t1                 # compute full size result
     daddu result, flag_x                 # add flag_x
@@ -821,12 +836,12 @@ OP(adda):
     addi dptr, 32                   # Point to AREG instead of DREG
     andi t0, opcode, 0x100          # Check W/L bit
     bnez t0, 1f                     # Jump to correct body
-    la rmw_op, op_adda16_rmwimpl    # ADDA 16-bit
+    lax rmw_op, op_adda16_rmwimpl   # ADDA 16-bit
     li opsize, 2                      # Force word size in EA decoding
     jal decode_ea                     # Decode EA
     addi eaptr, -2                    # Convert eaptr to long (for rmw32)
     j rmw32_easrc                     # Do RMW
-1:  la rmw_op, op_adda32_rmwimpl    # ADDA 32-bit
+1:  lax rmw_op, op_adda32_rmwimpl   # ADDA 32-bit
     li opsize, 4                      # Force long size in EA decoding
     jal decode_ea                     # Decode EA
     j rmw32_easrc                     # Do RMW
@@ -851,10 +866,10 @@ OP(group_logical):
 OP(andi):
     .set reorder
     ori opcode, 1<<8    # force rmw with eadst
-    lal rmw_op, op_and_rmwimpl
+    lax rmw_op, op_and_rmwimpl
     jal_and_j decode_imm, rmw
 OP(and):
-    lal rmw_op, op_and_rmwimpl
+    lax rmw_op, op_and_rmwimpl
     j op_group_logical
 op_and_rmwimpl:
     and result, t0, t1
@@ -866,10 +881,10 @@ op_and_rmwimpl:
 OP(ori):
     .set reorder
     ori opcode, 1<<8    # force rmw with eadst
-    lal rmw_op, op_or_rmwimpl
+    lax rmw_op, op_or_rmwimpl
     jal_and_j decode_imm, rmw
 OP(or):
-    lal rmw_op, op_or_rmwimpl
+    lax rmw_op, op_or_rmwimpl
     j op_group_logical
 op_or_rmwimpl:
     or result, t0, t1
@@ -881,10 +896,10 @@ op_or_rmwimpl:
 OP(eori):
     .set reorder
     ori opcode, 1<<8    # force rmw with eadst
-    lal rmw_op, op_eor_rmwimpl
+    lax rmw_op, op_eor_rmwimpl
     jal_and_j decode_imm, rmw
 OP(eor):
-    lal rmw_op, op_eor_rmwimpl
+    lax rmw_op, op_eor_rmwimpl
     j op_group_logical
 op_eor_rmwimpl:
     xor result, t0, t1
@@ -894,6 +909,86 @@ op_eor_rmwimpl:
     .set noreorder
 
 
+OP(asli): OP(asri):
+    .set reorder
+    andi t0, opcode, 1<<8
+    lax rmw_op, op_asl_rmwimpl
+    bnez t0, asli_start
+    xori opcode, 1<<8   # turn off dr so that rmw opmode is EA-dst
+    lax rmw_op, op_asr_rmwimpl
+asli_start:
+    srl t2, opcode, 9    # extract immediate value in t2
+    addi t2, -1          # if value is 0, it means 8
+    andi t2, 7
+    addi t2, 1
+    move dptr, m64k              # we don't need dptr, so set it somewhere
+    j rmw                        # call RMW (note opsize=0 in OP(bits)
+
+OP(asl): OP(asr):
+    andi t0, opcode, 1<<8
+    andi opcode, 0xFFFF^(1<<5)   # turn off ir so that EA is Dn
+    lax rmw_op, op_asl_rmwimpl
+    bnez t0, asl_start
+    lax rmw_op, op_asr_rmwimpl
+    ori opcode, 1<<8             # turn on dr so that EA is EAdst
+asl_start:
+    srl t0, opcode, 7
+    andi t0, 0x7<<2
+    lw_m64k t2, M64K_OFF_DREGS,t0
+    andi t2, 63
+    move dptr, m64k              # we don't need dptr, so set it somewhere
+    j rmw                        # call RMW (note opsize=0 in OP(bits)
+
+OP(asl_rmwimpl):    
+    dsllv result, t0, t2                # calculate extended result
+    dsllv flag_zc, result, flag_bitsize # affect Z and C flags
+    sllv flag_nv, result, flag_bitsize  # affect N flag and reset V flag
+    dsrav t1, flag_nv, t2               # shift back expected sign bits and
+    sllv t0, t0, flag_bitsize           # ...
+    sne t1, t0                          # compare to sign-extended input
+    dsll t1, 63                         # set V flag on mismatch
+    xor flag_nv, t1
+    beqz t2, 1f                         # affect X flag only if shift amount is 0
+    dsrl flag_x, flag_zc, 32
+1:  jr ra
+
+OP(asr_rmwimpl):
+    sllv flag_nv, t0, flag_bitsize      # set N flag to sign of input, reset V flag
+    dsll result, flag_nv, 32            # align input to the upper bits
+    dsrav result, result, t2            # arithmetic shift right
+    dsrlv result, result, flag_bitsize  # align result to bit 32, carry to bit 31
+    dsrl flag_zc, result, 31            # extract carry bit
+    dsll flag_zc, 32
+    dsrl result, 32                     # align result to bit 0, zero-extended
+    or flag_zc, result                  # combine Z and C
+    beqz t2, 1f                         # affect X flag only if shift amount is 0
+    dsrl flag_x, flag_zc, 32
+1:  jr ra
+    .set noreorder
+
+
+OP(aslm): OP(asrm):
+    .set reorder
+    jal decode_ea                       # decode EA (note opsize=2 in OP(bits))
+    check_addr_error eaptr32, read_address_error
+    andi t1, opcode, 0x100
+    lh t0, 0(eaptr)
+    bnez t1, op_asl_ea_left
+op_asl_ea_right:
+    sra result, t0, 1
+    andi flag_x, t0, 1
+    j op_asl_ea_finish
+op_asl_ea_left:
+    sll result, t0, 1
+    srl flag_x, result, 16
+op_asl_ea_finish:
+    sh result, 0(eaptr)
+    dsll flag_nv, result, 16
+    zx64 flag_zc, flag_nv
+    dsll t0, flag_x, 32
+    or flag_zc, t0
+    j main_loop
+    .set noreorder
 
 
 OP(moveb):
@@ -1047,6 +1142,13 @@ op8_1000: op8_1001: op8_1010: op8_1011: op8_1100: op8_1101: op8_1110: op8_1111:
 op4_0000: op4_0001: op4_0010: op4_0011: op4_0100: op4_0101: op4_0110: op4_0111:
 op4_1000: op4_1001: op4_1010: op4_1011: op4_1100: op4_1101: op4_1110: op4_1111:
 
+opb_010:  opb_011:
+opb_110:  opb_111:
+
+                                        opm_0100: opm_0101: opm_0110: opm_0101:
+opm_1000: opm_1001: opm_1010: opm_1011: opm_1100: opm_1101: opm_1110: opm_1111:
+
+op_lsl: op_lsli: op_lslm: op_lsr: op_lsri: op_lsrm:
     move a0, opcode
     jal __m64k_assert_invalid_opcode
     addiu a1, m_pc, -2
