@@ -911,13 +911,21 @@ op_eor_rmwimpl:
     .set noreorder
 
 
-OP(asli): OP(asri):
+OP(lsli): OP(lsri):
     .set reorder
+    xori opcode, 1<<3
+    lax t1, op_lsl_rmwimpl
+    lax t2, op_lsr_rmwimpl
+    j op_shift_imm
+OP(asli): OP(asri):
+    lax t1, op_asl_rmwimpl
+    lax t2, op_asr_rmwimpl
+op_shift_imm:
     andi t0, opcode, 1<<8
-    lax rmw_op, op_asl_rmwimpl
+    move rmw_op, t1
     bnez t0, asli_start
     xori opcode, 1<<8   # turn off dr so that rmw opmode is EA-dst
-    lax rmw_op, op_asr_rmwimpl
+    move rmw_op, t2
 asli_start:
     srl t2, opcode, 9    # extract immediate value in t2
     addi t2, -1          # if value is 0, it means 8
@@ -925,6 +933,33 @@ asli_start:
     addi t2, 1
     move dptr, m64k              # we don't need dptr, so set it somewhere
     j rmw                        # call RMW (note opsize=0 in OP(bits)
+
+OP(lsl): OP(lsr):
+    andi t0, opcode, 1<<8
+    andi opcode, 0xFFFF^(1<<5)^(1<<3)   # turn off ir so that EA is Dn
+    lax rmw_op, op_lsl_rmwimpl
+    bnez t0, asl_start
+    lax rmw_op, op_lsr_rmwimpl
+    ori opcode, 1<<8             # turn on dr so that EA is EAdst
+    j asl_start
+OP(lsl_rmwimpl):
+    dsllv result, t0, t2                # calculate extended result
+    dsllv flag_zc, result, flag_bitsize # affect Z and C flags
+    sllv flag_nv, result, flag_bitsize  # affect N flag and reset V flag
+    beqz t2, 1f                         # affect X flag only if shift amount is 0
+    dsrl flag_x, flag_zc, 32
+1:  jr ra
+OP(lsr_rmwimpl):
+    dsrlv result, t0, t2                # do the right shift into result
+    addi t1, t2, -1                     # reduce shift amount
+    dsrlv flag_zc, t0, t1               # shift one less (last bit = carry)
+    dsll flag_zc, 32                    # extract carry bit
+    or flag_zc, result                  # combine with zero bit
+    sll flag_nv, result, flag_bitsize   # set N to result sign and reset V
+    beqz t2, 1f                         # affect X flag only if shift amount is 0
+    dsrl flag_x, flag_zc, 32
+1:  jr ra
+
 
 OP(asl): OP(asr):
     andi t0, opcode, 1<<8
@@ -986,6 +1021,29 @@ op_asl_ea_left:
 op_asl_ea_finish:
     sh result, 0(eaptr)
     dsll flag_nv, result, 16
+    zx64 flag_zc, flag_nv
+    dsll t0, flag_x, 32
+    or flag_zc, t0
+    j main_loop
+    .set noreorder
+
+OP(lslm): OP(lsrm):
+    .set reorder
+    jal decode_ea                       # decode EA (note opsize=2 in OP(bits))
+    check_addr_error eaptr32, read_address_error
+    andi t1, opcode, 0x100
+    lhu t0, 0(eaptr)
+    bnez t1, op_lsl_ea_left
+op_lsl_ea_right:
+    srl result, t0, 1
+    andi flag_x, t0, 1
+    j op_lsl_ea_finish
+op_lsl_ea_left:
+    sll result, t0, 1
+    srl flag_x, result, 16
+op_lsl_ea_finish:
+    sh result, 0(eaptr)
+    sll flag_nv, result, 16
     zx64 flag_zc, flag_nv
     dsll t0, flag_x, 32
     or flag_zc, t0
@@ -1150,7 +1208,6 @@ opb_110:  opb_111:
                                         opm_0100: opm_0101: opm_0110: opm_0101:
 opm_1000: opm_1001: opm_1010: opm_1011: opm_1100: opm_1101: opm_1110: opm_1111:
 
-op_lsl: op_lsli: op_lslm: op_lsr: op_lsri: op_lsrm:
     move a0, opcode
     jal __m64k_assert_invalid_opcode
     addiu a1, m_pc, -2

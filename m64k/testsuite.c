@@ -222,6 +222,14 @@ int main()
         "rom:/ASL.b.btest",
         "rom:/ASL.l.btest",
         "rom:/ASL.w.btest",
+        "rom:/LSL.b.btest",
+        "rom:/LSL.l.btest",
+        "rom:/LSL.w.btest",
+        "rom:/LSR.b.btest",
+        "rom:/LSR.l.btest",
+        "rom:/LSR.w.btest",
+
+
         "rom:/ADD.b.btest",
         "rom:/ADD.l.btest",
         "rom:/ADD.w.btest",
