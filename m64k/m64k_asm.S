@@ -743,23 +743,24 @@ invalid_opmode:
 ###############################################################
 
 OP(addq):
+    .set reorder
     lax rmw_op, op_addq_rmwimpl
     srl t1, opcode, 9   # extract immediate value
+    addi t1, -1         # convert 0 to 8
     andi t1, 0x7
-    bnez t1, 1f         # if immediate is not 0, skip
+    addi t1, 1
     ori opcode, 1<<8    # force rmw with eadst
-    li t1, 8            # if immediate is 0, use 8
-1:  sw t1, M64K_OFF_PENDINGEXC+4(m64k)      # store imediate into dummy space
+    sw t1, M64K_OFF_PENDINGEXC+4(m64k)      # store imediate into dummy space
     la dptr, M64K_OFF_PENDINGEXC+4(m64k)    # set dptr to dummy space
-    j rmw
     li opsize, 0        # opsize not calculated yet
+    j rmw
 op_addq_rmwimpl:
-    srl t2, opcode, 3            # check if EA is An
+    srl t2, opcode, 3                 # check if EA is An
     andi t2, 7
-    bne t2, 1, op_add_rmwimpl    # if not, do normal add
-    daddu result, t0, t1         # do add but leave flags unchanged
+    daddu result, t0, t1
+    bne t2, 1, op_add_rmwimpl_flags   # if not, calculate flags like add
     jr ra
-    nop
+    .set noreorder
 
 OP(addi):
     .set reorder
@@ -783,6 +784,7 @@ OP(add):
     j rmw
 op_add_rmwimpl:
     daddu result, t0, t1
+op_add_rmwimpl_flags:
     dsll flag_zc, result, flag_bitsize
     dsrl flag_x, flag_zc, 32
     sllv t0, t0, flag_bitsize
