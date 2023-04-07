@@ -238,6 +238,18 @@ int main()
         "rom:/ADDX.w.btest",
         "rom:/ADDA.l.btest",
         "rom:/ADDA.w.btest",
+
+        "rom:/SUB.b.btest",
+        "rom:/SUB.l.btest",
+        "rom:/SUB.w.btest",
+        "rom:/SUBX.b.btest",
+        "rom:/SUBX.l.btest",
+        "rom:/SUBX.w.btest",
+        "rom:/SUBA.l.btest",
+        "rom:/SUBA.w.btest",
+
+
+
         "rom:/MOVE.b.btest",
         "rom:/MOVE.w.btest",
         "rom:/MOVE.l.btest",

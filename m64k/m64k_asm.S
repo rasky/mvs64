@@ -36,9 +36,9 @@ pc_diff:      .long 0
 
 optable0:
     .long   op_tbl8,  op_moveb, op_movel, op_movew, op_tbl4,  op_addq,  op0_0110, op_moveq
-    .long   op_or,    op0_1001, op0_1010, op_eor,   op_and,   op_add,   op_bits,  op0_1111
+    .long   op_or,    op_sub,   op0_1010, op_eor,   op_and,   op_add,   op_bits,  op0_1111
 optable8:
-    .long   op_ori,   op8_0001, op_andi,  op8_0011, op8_0100, op8_0101, op_addi,  op8_0111
+    .long   op_ori,   op8_0001, op_andi,  op8_0011, op_subi,  op8_0101, op_addi,  op8_0111
     .long   op8_1000, op8_1001, op_eori,  op8_1011, op8_1100, op8_1101, op8_1110, op8_1111
 optable4:
     .long   op_mvfsr, op4_0001, op4_0010, op4_0011, op_mvccr, op4_0101, op_mvtsr, op4_0111
@@ -347,8 +347,9 @@ compute_fc:
     sw_m64k t0, M64K_OFF_PENDINGEXC+8    # Store FC
 
     # Check if we need fixups
-    andi t0, opcode, 0xF138              # Fixup for ADDX pre-decrement
-    beq t0, 0xD108, addrerr_fixup_addq
+    andi t0, opcode, 0xF138              
+    beq t0, 0xD108, addrerr_fixup_addq  # Fixup for ADDX pre-decrement
+    beq t0, 0x9108, addrerr_fixup_addq  # Fixup for SUBX pre-decrement
     andi t0, opcode, 0xFFC0
     beq t0, 0x40C0, addrerr_fixup_mvfsr
     j main_loop_exit
@@ -662,7 +663,7 @@ ea7_101: ea7_110: ea7_111:
 # RMW accesses
 ###############################################################
 
-    .data
+    .sdata
 rmw_table:
     .long   rmw8_easrc, rmw16_easrc, rmw32_easrc, invalid_opmode
     .long   rmw8_eadst, rmw16_eadst, rmw32_eadst, invalid_opmode
@@ -705,28 +706,28 @@ rmw32_easrc:
     j main_loop
 rmw8_eadst:
     li flag_bitsize, 24
-    lbu t1, 3(dptr)
-    lbu t0, 0(eaptr)
+    lbu t0, 3(dptr)
+    lbu t1, 0(eaptr)
     jalr rmw_op
     sb result, 0(eaptr)
     j main_loop
 rmw16_eadst:
     check_addr_error eaptr32, read_address_error
     li flag_bitsize, 16
-    lhu t1, 2(dptr)
-    lhu t0, 0(eaptr)
+    lhu t0, 2(dptr)
+    lhu t1, 0(eaptr)
     jalr rmw_op
     sh result, 0(eaptr)
     j main_loop
 rmw32_eadst:
     check_addr_error eaptr32, read_address_error
     li flag_bitsize, 0
-    lwl t1, 0(dptr)   # NOTE: this is to handle immediate case (where dptr is PC-relative)
-    lwr t1, 3(dptr)
-    lwl t0, 0(eaptr)
-    lwr t0, 3(eaptr)
-    zx64 t1
+    lwl t0, 0(dptr)   # NOTE: this is to handle immediate case (where dptr is PC-relative)
+    lwr t0, 3(dptr)
+    lwl t1, 0(eaptr)
+    lwr t1, 3(eaptr)
     zx64 t0
+    zx64 t1
     jalr rmw_op
     swl result, 0(eaptr)
     swr result, 3(eaptr)
@@ -742,25 +743,34 @@ invalid_opmode:
 # Opcodes
 ###############################################################
 
-OP(addq):
+OP(addq): OP(subq):
     .set reorder
+    lax rmw_op, op_subq_rmwimpl
+    andi t0, opcode, 1<<8
+    bnez t0, 1f
     lax rmw_op, op_addq_rmwimpl
-    srl t1, opcode, 9   # extract immediate value
+    ori opcode, 1<<8    # force rmw with eadst
+1:  srl t1, opcode, 9   # extract immediate value
     addi t1, -1         # convert 0 to 8
     andi t1, 0x7
     addi t1, 1
-    ori opcode, 1<<8    # force rmw with eadst
     sw t1, M64K_OFF_PENDINGEXC+4(m64k)      # store imediate into dummy space
     la dptr, M64K_OFF_PENDINGEXC+4(m64k)    # set dptr to dummy space
-    li opsize, 0        # opsize not calculated yet
+    li opsize, 0            # opsize not calculated yet
+    andi result, opcode, 0x7<<3  # isolate EA mode
+    xori result, 1<<3            # set 0 if EA mode is An
     j rmw
 op_addq_rmwimpl:
-    srl t2, opcode, 3                 # check if EA is An
-    andi t2, 7
-    daddu result, t0, t1
-    bne t2, 1, op_add_rmwimpl_flags   # if not, calculate flags like add
-    jr ra
     .set noreorder
+    bnez result, op_add_rmwimpl_flags   # if EA mode is not An, calculate flags
+    daddu result, t0, t1
+    jr ra
+    nop
+op_subq_rmwimpl:
+    bnez result, op_sub_rmwimpl_flags   # if not, calculate flags like add
+    dsubu result, t1, t0
+    jr ra
+    nop
 
 OP(addi):
     .set reorder
@@ -768,16 +778,20 @@ OP(addi):
     jal decode_imm
     ori opcode, 1<<8    # force rmw with eadst
     j rmw
-    nop
+op_subi:  # (same cacheline)
+    lax rmw_op, op_sub_rmwimpl
+    jal decode_imm
+    ori opcode, 1<<8    # force rmw with eadst
+    j rmw
+
 OP(add):
-    # check if the opcode is addx instead
     lax rmw_op, op_add_rmwimpl
     srl dptr, opcode, 7       # get data register pointer
     andi dptr, 0x7 << 2       # isolate data register pointer
     la_m64k dptr, M64K_OFF_DREGS,dptr
     andi t0, opcode, 0xC0
     beq t0, 0xC0, op_adda     # if adda jump to implementation
-    andi t0, opcode, 0x130
+    andi t0, opcode, 0x130    # check if the opcode is addx instead
     xori t0, 0x100
     li opsize, 0              # opsize not calculated yet
     beqz t0, op_addx          # if addx, jump to implementation
@@ -793,9 +807,38 @@ op_add_rmwimpl_flags:
     jr ra
     .set noreorder
 
-OP(addx):
+OP(sub):
     .set reorder
+    # check if the opcode is addx instead
+    lax rmw_op, op_sub_rmwimpl
+    srl dptr, opcode, 7       # get data register pointer
+    andi dptr, 0x7 << 2       # isolate data register pointer
+    la_m64k dptr, M64K_OFF_DREGS,dptr
+    andi t0, opcode, 0xC0
+    beq t0, 0xC0, op_suba     # if suba jump to implementation
+    andi t0, opcode, 0x130
+    xori t0, 0x100
+    li opsize, 0              # opsize not calculated yet
+    beqz t0, op_subx          # if subx, jump to implementation
+    j rmw
+op_sub_rmwimpl:
+    dsubu result, t1, t0
+op_sub_rmwimpl_flags:
+    dsll flag_zc, result, flag_bitsize
+    dsrl flag_x, flag_zc, 32
+    sllv t0, t0, flag_bitsize
+    sllv t1, t1, flag_bitsize
+    dsubu flag_nv, t1, t0
+    jr ra
+    .set noreorder
+
+OP(subx):
+    .set reorder
+    lax rmw_op, op_subx_rmwimpl
+    j op_addx_start
+OP(addx):
     lax rmw_op, op_addx_rmwimpl
+op_addx_start:
     andi t0, opcode, 0x8         # isolate R/M bit
     andi t1, opcode, 0x7         # extract Ry*4
     sll t1, 2
@@ -831,10 +874,29 @@ op_addx_rmwimpl:
     daddu flag_nv, flag_x
     dsrl flag_x, flag_zc, 32             # copy new carry bit into flag_x
     jr ra
+OP(subx_rmwimpl):
+    andi flag_x, 1                       # isolate flag_x to 0/1
+    zx64 t2, flag_zc                     # put current Z flag (without C) into t2
+    dsubu result, t1, t0                 # compute full size result
+    dsubu result, flag_x                 # subtract flag_x
+    dsll flag_zc, result, flag_bitsize   # compute new flag_zc
+    or flag_zc, t2                       # combine with old Z flag
+    sllv t0, t0, flag_bitsize            # put operands into MSB
+    sllv t1, t1, flag_bitsize
+    sllv flag_x, flag_x, flag_bitsize
+    dsubu flag_nv, t1, t0                # compute flag_nv
+    dsubu flag_nv, flag_x
+    dsrl flag_x, flag_zc, 32             # copy new carry bit into flag_x
+    jr ra
     .set noreorder
 
-OP(adda):
+OP(suba):
     .set reorder
+    li result, 1
+    j op_adda_start
+OP(adda):
+    li result, 0
+op_adda_start:
     addi dptr, 32                   # Point to AREG instead of DREG
     andi t0, opcode, 0x100          # Check W/L bit
     bnez t0, 1f                     # Jump to correct body
@@ -851,7 +913,10 @@ op_adda16_rmwimpl:
     sll t0, 16
     sra t0, 16
 op_adda32_rmwimpl:
+    bnez result, 1f
     daddu result, t0, t1
+    jr ra
+1:  dsubu result, t1, t0
     jr ra
     .set noreorder
 
@@ -1207,7 +1272,6 @@ opb_110:  opb_111:
 
                                         opm_0100: opm_0101: opm_0110: opm_0101:
 opm_1000: opm_1001: opm_1010: opm_1011: opm_1100: opm_1101: opm_1110: opm_1111:
-
     move a0, opcode
     jal __m64k_assert_invalid_opcode
     addiu a1, m_pc, -2
