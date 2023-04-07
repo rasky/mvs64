@@ -41,8 +41,11 @@ optable8:
     .long   op_ori,   op8_0001, op_andi,  op8_0011, op_subi,  op8_0101, op_addi,  op8_0111
     .long   op8_1000, op8_1001, op_eori,  op8_1011, op8_1100, op8_1101, op8_1110, op8_1111
 optable4:
-    .long   op_mvfsr, op4_0001, op4_0010, op4_0011, op_mvccr, op4_0101, op_mvtsr, op4_0111
-    .long   op4_1000, op4_1001, op4_1010, op4_1011, op4_1100, op4_1101, op_mvusp, op4_1111
+    .long   op_mvfsr, op_lea,   op4_0010, op_lea,   op_mvccr, op_lea,   op_mvtsr, op_lea
+    .long   op_pea,   op_lea,   op4_1010, op_lea,   op4_1100, op_lea,   op_tbl4e, op_lea
+optable4e:
+    .long   op4e_0000, op4e_0001, op4e_0010, op4e_0011, op4e_0100, op_link,   op_mvusp,  op4e_0111    
+    .long   op4e_1000, op4e_1001, op4e_1010, op4e_1011, op4e_1100, op4e_1101, op4e_1110, op4e_1111    
 opbits:
     .long   op_asli,  op_lsli,  opb_010,  opb_011
     .long   op_asl,   op_lsl,   opb_110,  opb_111
@@ -177,6 +180,12 @@ OP(tbl4):
     srl t0, opcode, 6
     andi t0, 0xF << 2
     lw t0, optable4(t0)
+    jr t0
+    nop
+OP(tbl4e):
+    srl t0, opcode, 2
+    andi t0, 0xF << 2
+    lw t0, optable4e(t0)
     jr t0
     nop
 OP(bits):
@@ -743,8 +752,9 @@ invalid_opmode:
 # Opcodes
 ###############################################################
 
-OP(addq): OP(subq):
     .set reorder
+
+OP(addq): OP(subq):
     lax rmw_op, op_subq_rmwimpl
     andi t0, opcode, 1<<8
     bnez t0, 1f
@@ -771,9 +781,9 @@ op_subq_rmwimpl:
     dsubu result, t1, t0
     jr ra
     nop
+    .set reorder
 
 OP(addi):
-    .set reorder
     lax rmw_op, op_add_rmwimpl
     jal decode_imm
     ori opcode, 1<<8    # force rmw with eadst
@@ -805,10 +815,8 @@ op_add_rmwimpl_flags:
     sllv t1, t1, flag_bitsize
     daddu flag_nv, t0, t1
     jr ra
-    .set noreorder
 
 OP(sub):
-    .set reorder
     # check if the opcode is addx instead
     lax rmw_op, op_sub_rmwimpl
     srl dptr, opcode, 7       # get data register pointer
@@ -830,10 +838,8 @@ op_sub_rmwimpl_flags:
     sllv t1, t1, flag_bitsize
     dsubu flag_nv, t1, t0
     jr ra
-    .set noreorder
 
 OP(subx):
-    .set reorder
     lax rmw_op, op_subx_rmwimpl
     j op_addx_start
 OP(addx):
@@ -888,10 +894,8 @@ OP(subx_rmwimpl):
     dsubu flag_nv, flag_x
     dsrl flag_x, flag_zc, 32             # copy new carry bit into flag_x
     jr ra
-    .set noreorder
 
 OP(suba):
-    .set reorder
     li result, 1
     j op_adda_start
 OP(adda):
@@ -918,20 +922,16 @@ op_adda32_rmwimpl:
     jr ra
 1:  dsubu result, t1, t0
     jr ra
-    .set noreorder
 
 
 OP(group_logical):
-    .set reorder
     srl dptr, opcode, 7       # get data register pointer
     andi dptr, 0x7 << 2
     la_m64k dptr, M64K_OFF_DREGS,dptr
     li opsize, 0
     j rmw
-    .set noreorder
 
 OP(andi):
-    .set reorder
     ori opcode, 1<<8    # force rmw with eadst
     lax rmw_op, op_and_rmwimpl
     jal_and_j decode_imm, rmw
@@ -943,10 +943,8 @@ op_and_rmwimpl:
     sllv flag_nv, result, flag_bitsize
     zx64 flag_zc, flag_nv
     jr ra
-    .set noreorder
 
 OP(ori):
-    .set reorder
     ori opcode, 1<<8    # force rmw with eadst
     lax rmw_op, op_or_rmwimpl
     jal_and_j decode_imm, rmw
@@ -958,10 +956,8 @@ op_or_rmwimpl:
     sllv flag_nv, result, flag_bitsize
     zx64 flag_zc, flag_nv
     jr ra
-    .set noreorder
 
 OP(eori):
-    .set reorder
     ori opcode, 1<<8    # force rmw with eadst
     lax rmw_op, op_eor_rmwimpl
     jal_and_j decode_imm, rmw
@@ -973,11 +969,9 @@ op_eor_rmwimpl:
     sllv flag_nv, result, flag_bitsize
     zx64 flag_zc, flag_nv
     jr ra
-    .set noreorder
 
 
 OP(lsli): OP(lsri):
-    .set reorder
     xori opcode, 1<<3
     lax t1, op_lsl_rmwimpl
     lax t2, op_lsr_rmwimpl
@@ -1066,11 +1060,9 @@ OP(asr_rmwimpl):
     beqz t2, 1f                         # affect X flag only if shift amount is 0
     dsrl flag_x, flag_zc, 32
 1:  jr ra
-    .set noreorder
 
 
 OP(aslm): OP(asrm):
-    .set reorder
     jal decode_ea                       # decode EA (note opsize=2 in OP(bits))
     check_addr_error eaptr32, read_address_error
     andi t1, opcode, 0x100
@@ -1090,10 +1082,8 @@ op_asl_ea_finish:
     dsll t0, flag_x, 32
     or flag_zc, t0
     j main_loop
-    .set noreorder
 
 OP(lslm): OP(lsrm):
-    .set reorder
     jal decode_ea                       # decode EA (note opsize=2 in OP(bits))
     check_addr_error eaptr32, read_address_error
     andi t1, opcode, 0x100
@@ -1113,11 +1103,9 @@ op_lsl_ea_finish:
     dsll t0, flag_x, 32
     or flag_zc, t0
     j main_loop
-    .set noreorder
 
 
 OP(moveb):
-    .set reorder
     li opsize, 1
     jal decode_ea
     lbu flag_zc, 0(eaptr)
@@ -1128,10 +1116,8 @@ OP(moveb):
     sb flag_zc, 0(eaptr)
     sll flag_nv, flag_zc, 24
     j main_loop
-    .set noreorder
 
 OP(movew):
-    .set reorder
     li opsize, 2
     jal decode_ea
     check_addr_error eaptr32, read_address_error
@@ -1146,10 +1132,8 @@ OP(movew):
     check_addr_error eaptr32, write_address_error
     sh flag_zc, 0(eaptr)             # store the word into the destination
     j main_loop
-    .set noreorder
 
 OP(movel):
-    .set reorder
     li opsize, 4
     jal decode_ea
     check_addr_error eaptr32, read_address_error
@@ -1166,10 +1150,8 @@ OP(movel):
     swl flag_nv, 0(eaptr)
     swr flag_nv, 3(eaptr)
     j main_loop
-    .set noreorder
 
 OP(moveq):
-    .set reorder
     sll flag_nv, opcode, 24
     sra flag_nv, 24
     andi flag_zc, opcode, 0xFF
@@ -1177,39 +1159,31 @@ OP(moveq):
     andi t1, 0x7 << 2
     sw_m64k flag_nv, M64K_OFF_DREGS,t1
     j main_loop
-    .set noreorder
 
 OP(movea16):
-    .set reorder
     lh t1, 0(eaptr)
     srl t0, opcode, 7
     andi t0, 0x7<<2
     sw_m64k t1, M64K_OFF_AREGS,t0
     j main_loop
-    .set noreorder
 
 OP(movea32):
-    .set reorder
     lwl t1, 0(eaptr)
     lwr t1, 3(eaptr)
     srl t0, opcode, 7
     andi t0, 0x7<<2
     sw_m64k t1, M64K_OFF_AREGS,t0
     j main_loop
-    .set noreorder
 
 OP(mvfsr):
-    .set reorder
     li opsize, 2
     jal decode_ea
     check_addr_error eaptr32, write_address_error
     jal flush_sr
     sh t1, 0(eaptr)
     j main_loop
-    .set noreorder
 
 OP(mvccr):
-    .set reorder
     li opsize, 2
     jal decode_ea
     check_addr_error eaptr32, read_address_error
@@ -1222,10 +1196,8 @@ OP(mvccr):
     sw_m64k t0, M64K_OFF_SR
     jal reload_sr
     j main_loop
-    .set noreorder
 
 OP(mvtsr):
-    .set reorder
     li opsize, 2
     jal decode_ea
     check_addr_error eaptr32, read_address_error
@@ -1235,10 +1207,8 @@ OP(mvtsr):
     sw_m64k t0, M64K_OFF_SR
     jal reload_sr
     j main_loop
-    .set noreorder
 
 OP(mvusp):
-    .set reorder
     lw_m64k t0, M64K_OFF_SR    # Read current SR
     andi t0, 0x2000            # Check supervisor bit
     beqz t0, privilege_violation_error
@@ -1254,7 +1224,68 @@ mvusp_read:
     sw_m64k t2, M64K_OFF_AREGS,t1
     j main_loop
 
-    .set noreorder
+OP(pea):
+    li opsize, 2
+    jal decode_ea
+    lw_m64k t0, M64K_OFF_AREGS+7*4
+    addiu t0, -4
+    check_addr_error t0, write_address_error
+    map_m68k t1, t0
+    swl eaptr32, 0(t0)
+    swr eaptr32, 3(t0)
+    sw_m64k t0, M64K_OFF_AREGS+7*4
+    j main_loop
+
+OP(lea):
+    li opsize, 2
+    jal decode_ea
+    srl t1, opcode, 7
+    andi t1, 0x7<<2
+    sw_m64k eaptr32, M64K_OFF_AREGS,t1
+    j main_loop
+
+OP(link):
+    andi t2, opcode, 7                 # extract An from opcode
+    sll t2, 2
+    la_m64k t2, M64K_OFF_AREGS,t2      # compute An pointer
+
+    andi t1, opcode, 1<<3
+    bnez t1, op_unlk
+
+    lw_m64k t1, M64K_OFF_AREGS+7*4
+    addiu t1, -4
+    sw_m64k t1, M64K_OFF_AREGS+7*4
+    map_m68k t3, t1
+    check_addr_error t1, write_address_error
+
+    lw t0, 0(t2)    # read An
+    swl t0, 0(t3)   # An -> (SP)
+    swr t0, 3(t3)
+    sw t1, 0(t2)    # SP -> An
+
+    lh t2, 0(m_pc)  # read displacement
+    addiu m_pc, 2
+    addu t1, t2     # SP += disp
+    sw_m64k t1, M64K_OFF_AREGS+7*4
+    j main_loop
+
+OP(unlk):
+    lw t0, 0(t2)                         # read An
+    sw_m64k t0, M64K_OFF_AREGS+7*4       # An -> SP
+    map_m68k t1, t0
+    check_addr_error t0, read_address_error
+
+    lwl t3, 0(t1)                        # read (SP)
+    lwr t3, 3(t1)                        # read (SP)
+
+    lw_m64k t0, M64K_OFF_AREGS+7*4       # read SP
+    addiu t0, 4                          # SP += 4
+    sw_m64k t0, M64K_OFF_AREGS+7*4       # write SP
+
+    sw t3, (t2)                          # (SP) -> An
+    j main_loop
+
+
 
 
 
@@ -1272,6 +1303,10 @@ opb_110:  opb_111:
 
                                         opm_0100: opm_0101: opm_0110: opm_0101:
 opm_1000: opm_1001: opm_1010: opm_1011: opm_1100: opm_1101: opm_1110: opm_1111:
+
+op4e_0000: op4e_0001: op4e_0010: op4e_0011: op4e_0100:                       op4e_0111:
+op4e_1000: op4e_1001: op4e_1010: op4e_1011: op4e_1100: op4e_1101: op4e_1110: op4e_1111:
+
     move a0, opcode
     jal __m64k_assert_invalid_opcode
     addiu a1, m_pc, -2
