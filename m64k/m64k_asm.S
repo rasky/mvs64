@@ -27,7 +27,7 @@ optable8:
     .long   op_ori,   op8_0001, op_andi,  op8_0011, op_subi,  op8_0101, op_addi,  op8_0111
     .long   op8_1000, op8_1001, op_eori,  op8_1011, op8_1100, op8_1101, op8_1110, op8_1111
 optable4:
-    .long   op_mvfsr, op_lea,   op_clr,   op_lea,   op_neg,   op_lea,   op_not,   op_lea
+    .long   op_negx,  op_lea,   op_clr,   op_lea,   op_neg,   op_lea,   op_not,   op_lea
     .long   op_pea,   op_lea,   op4_1010, op_lea,   op4_1100, op_lea,   op_tbl4e, op_lea
 optable4e:
     .long   op4e_0000, op4e_0001, op4e_0010, op4e_0011, op4e_0100, op_link,   op_mvusp,  op4e_0111    
@@ -170,6 +170,10 @@ _m64k_asmrun:
     map_m68k m_pc, t1
     sub t1, m_pc
     sw t1, pc_diff                    # Save difference between m_pc and PC
+
+    # Initialize dptr to a valid pointer, for ops that don't set it
+    # and then ignore the read value.
+    move dptr, m64k
 
     jal reload_sr
     nop
@@ -698,7 +702,9 @@ rmw_table:
 
     .text
     .set noreorder
-ALIGN(rmw):
+ALIGN(rmw_eadst):
+    ori opcode, 1<<8          # force EA mode to EA-dst
+rmw:
     jal decode_ea             # decode EA into eaptr/eaptr32
 rmw_no_ea:
     srl t3, opcode, 4         # extract size+src/dst flag
@@ -778,7 +784,6 @@ OP(addq): OP(subq):
     andi t0, opcode, 1<<8
     bnez t0, 1f
     lax rmw_op, op_addq_rmwimpl
-    ori opcode, 1<<8    # force rmw with eadst
 1:  srl t1, opcode, 9   # extract immediate value
     addi t1, -1         # convert 0 to 8
     andi t1, 0x7
@@ -788,7 +793,7 @@ OP(addq): OP(subq):
     li opsize, 0            # opsize not calculated yet
     andi result, opcode, 0x7<<3  # isolate EA mode
     xori result, 1<<3            # set 0 if EA mode is An
-    j rmw
+    j rmw_eadst
 op_addq_rmwimpl:
     .set noreorder
     bnez result, op_add_rmwimpl_flags   # if EA mode is not An, calculate flags
@@ -804,14 +809,10 @@ op_subq_rmwimpl:
 
 OP(addi):
     lax rmw_op, op_add_rmwimpl
-    jal decode_imm
-    ori opcode, 1<<8    # force rmw with eadst
-    j rmw
+    jal_and_j decode_imm, rmw_eadst
 op_subi:  # (same cacheline)
     lax rmw_op, op_sub_rmwimpl
-    jal decode_imm
-    ori opcode, 1<<8    # force rmw with eadst
-    j rmw
+    jal_and_j decode_imm, rmw_eadst
 
 OP(add):
     lax rmw_op, op_add_rmwimpl
@@ -951,9 +952,8 @@ OP(group_logical):
     j rmw
 
 OP(andi):
-    ori opcode, 1<<8    # force rmw with eadst
     lax rmw_op, op_and_rmwimpl
-    jal_and_j decode_imm, rmw
+    jal_and_j decode_imm, rmw_eadst
 OP(and):
     lax rmw_op, op_and_rmwimpl
     j op_group_logical
@@ -964,9 +964,8 @@ op_and_rmwimpl:
     jr ra
 
 OP(ori):
-    ori opcode, 1<<8    # force rmw with eadst
     lax rmw_op, op_or_rmwimpl
-    jal_and_j decode_imm, rmw
+    jal_and_j decode_imm, rmw_eadst
 OP(or):
     lax rmw_op, op_or_rmwimpl
     j op_group_logical
@@ -977,9 +976,8 @@ op_or_rmwimpl:
     jr ra
 
 OP(eori):
-    ori opcode, 1<<8    # force rmw with eadst
     lax rmw_op, op_eor_rmwimpl
-    jal_and_j decode_imm, rmw
+    jal_and_j decode_imm, rmw_eadst
 OP(eor):
     lax rmw_op, op_eor_rmwimpl
     j op_group_logical
@@ -992,10 +990,8 @@ op_eor_rmwimpl:
 OP(not):
     srl t0, opcode, 6
     beq t0, 0b0100011011, op_mvtsr
-    ori opcode, 1<<8    # force rmw with eadst
     lax rmw_op, op_not_rmwimpl
-    move dptr, m64k
-    j rmw
+    j rmw_eadst
 op_not_rmwimpl:
     not result, t1
     sll flag_nv, result, flag_bitsize
@@ -1005,17 +1001,23 @@ op_not_rmwimpl:
 OP(neg):
     srl t0, opcode, 6
     beq t0, 0b0100010011, op_mvccr
-    ori opcode, 1<<8    # force rmw with eadst
     lax rmw_op, op_neg_rmwimpl
-    move dptr, m64k
-    j rmw
+    j rmw_eadst
 op_neg_rmwimpl:
-    neg result, t1
-    sll t1, flag_bitsize
-    dneg flag_nv, t1
-    sne flag_x, result, zero
-    neg flag_zc, flag_x
-    jr ra
+    move t0, t1
+    li t1, 0
+    j op_sub_rmwimpl
+
+OP(negx):
+    srl t0, opcode, 6
+    beq t0, 0b0100000011, op_mvfsr
+    lax rmw_op, op_negx_rmwimpl
+    j rmw_eadst
+op_negx_rmwimpl:
+    move t0, t1
+    li t1, 0
+    j op_subx_rmwimpl
+
 
 OP(lsli): OP(lsri):
     xori opcode, 1<<3
@@ -1029,15 +1031,13 @@ op_shift_imm:
     andi t0, opcode, 1<<8
     move rmw_op, t1
     bnez t0, asli_start
-    xori opcode, 1<<8   # turn off dr so that rmw opmode is EA-dst
     move rmw_op, t2
 asli_start:
     srl t2, opcode, 9    # extract immediate value in t2
     addi t2, -1          # if value is 0, it means 8
     andi t2, 7
     addi t2, 1
-    move dptr, m64k              # we don't need dptr, so set it somewhere
-    j rmw                        # call RMW (note opsize=0 in OP(bits)
+    j rmw_eadst          # call RMW (note opsize=0 in OP(bits)
 
 OP(lsl): OP(lsr):
     andi t0, opcode, 1<<8
@@ -1045,7 +1045,6 @@ OP(lsl): OP(lsr):
     lax rmw_op, op_lsl_rmwimpl
     bnez t0, asl_start
     lax rmw_op, op_lsr_rmwimpl
-    ori opcode, 1<<8             # turn on dr so that EA is EAdst
     j asl_start
 OP(lsl_rmwimpl):
     dsllv result, t1, t2                # calculate extended result
@@ -1072,14 +1071,12 @@ OP(asl): OP(asr):
     lax rmw_op, op_asl_rmwimpl
     bnez t0, asl_start
     lax rmw_op, op_asr_rmwimpl
-    ori opcode, 1<<8             # turn on dr so that EA is EAdst
 asl_start:
     srl t0, opcode, 7
     andi t0, 0x7<<2
     lw_m64k t2, M64K_OFF_DREGS,t0
-    move dptr, m64k              # we don't need dptr, so set it somewhere
     andi t2, 63
-    j rmw                        # call RMW (note opsize=0 in OP(bits)
+    j rmw_eadst                  # call RMW (note opsize=0 in OP(bits)
 
 OP(asl_rmwimpl):    
     dsllv result, t1, t2                # calculate extended result

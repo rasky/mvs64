@@ -209,6 +209,9 @@ int main()
 	}
 #else
     static const char *testfns[] = {
+        "rom:/NEGX.b.btest",
+        "rom:/NEGX.l.btest",
+        "rom:/NEGX.w.btest",
         "rom:/NEG.b.btest",
         "rom:/NEG.l.btest",
         "rom:/NEG.w.btest",
