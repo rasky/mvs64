@@ -38,7 +38,7 @@ static uint8_t m68k_ram_r8(uint32_t addr) {
         if (ram_address[i] == 0xFFFFFFFF) {
             ram_address[i] = page;
             memset(ram_pages[i], 0, 8192);
-            debugf("Mapping RAM page %d at %08lx\n", i, page);
+            // debugf("Mapping RAM page %d at %08lx\n", i, page);
             tlb_map_area(i, (void*)page, 0x1FFF, PhysicalAddr(ram_pages[i]), true);
             return 0;
         }

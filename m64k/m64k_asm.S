@@ -4,20 +4,6 @@
 
     .set noreorder
 
-# Currently, we use TLBs for memory accesses, so we can access
-# the 68k memory map directly.
-.macro map_m68k reg, src
-    .ifnb \src
-    sll \reg, \src, 8
-    .else
-    sll \reg, 8
-    .endif
-    srl \reg, 8
-    #if M64K_MEMORY_BASE != 0
-    add \reg, M64K_MEMORY_BASE
-    #endif
-.endm
-
 .macro check_addr_error reg, label
     #if M64K_CONFIG_ADDRERR
     .set noat
@@ -58,6 +44,7 @@ opbitsmem:
 #define OP(x)       .balign 32; op_##x
 #define m64k        a0
 #define m_cycles    a1    // cycles to execute (NOTE: must be kept caller-saved register)
+#define mmap_mask   a2
 
 #define lax_base    v0
 #define zx64_mask   v1
@@ -128,6 +115,30 @@ opbitsmem:
     j \func
 .endm
 
+.macro map_m68k dst, src
+    #if M68K_CONFIG_MEMORY_BASE == 0x00000000
+        .ifnb \src
+        and \dst, \src, mmap_mask
+        .else
+        and \dst, mmap_mask
+        .endif
+    #elif M68K_CONFIG_MEMORY_BASE == 0xFF000000
+        .ifnb \src
+        or \dst, \src, mmap_mask
+        .else
+        or \dst, mmap_mask
+        .endif
+    #else
+        .ifnb \src
+        sll \dst, \src, 8
+        .else
+        sll \dst, 8
+        .endif
+        srl \reg, 8
+        add \reg, mmap_mask
+    #endif
+.endm
+
     .globl _m64k_asmrun
 _m64k_asmrun:
     addiu sp,sp,-128
@@ -142,6 +153,11 @@ _m64k_asmrun:
     sd s8,96(sp)
     sd ra,104(sp)
 
+    #if M68K_CONFIG_MEMORY_BASE == 0x00000000 
+    li mmap_mask, 0x00FFFFFF
+    #else
+    li mmap_mask, M68K_CONFIG_MEMORY_BASE
+    #endif
     la lax_base, LAX_BASE_ADDR
     dli zx64_mask, 0x00000000FFFFFFFF
     la m_cyc_table, __m64k_cycle_table
@@ -1002,16 +1018,16 @@ OP(lsl): OP(lsr):
     ori opcode, 1<<8             # turn on dr so that EA is EAdst
     j asl_start
 OP(lsl_rmwimpl):
-    dsllv result, t0, t2                # calculate extended result
+    dsllv result, t1, t2                # calculate extended result
     dsllv flag_zc, result, flag_bitsize # affect Z and C flags
     sllv flag_nv, result, flag_bitsize  # affect N flag and reset V flag
     beqz t2, 1f                         # affect X flag only if shift amount is 0
     dsrl flag_x, flag_zc, 32
 1:  jr ra
 OP(lsr_rmwimpl):
-    dsrlv result, t0, t2                # do the right shift into result
-    addi t1, t2, -1                     # reduce shift amount
-    dsrlv flag_zc, t0, t1               # shift one less (last bit = carry)
+    dsrlv result, t1, t2                # do the right shift into result
+    addi t0, t2, -1                     # reduce shift amount
+    dsrlv flag_zc, t1, t0               # shift one less (last bit = carry)
     dsll flag_zc, 32                    # extract carry bit
     or flag_zc, result                  # combine with zero bit
     sll flag_nv, result, flag_bitsize   # set N to result sign and reset V
@@ -1031,25 +1047,25 @@ asl_start:
     srl t0, opcode, 7
     andi t0, 0x7<<2
     lw_m64k t2, M64K_OFF_DREGS,t0
-    andi t2, 63
     move dptr, m64k              # we don't need dptr, so set it somewhere
+    andi t2, 63
     j rmw                        # call RMW (note opsize=0 in OP(bits)
 
 OP(asl_rmwimpl):    
-    dsllv result, t0, t2                # calculate extended result
+    dsllv result, t1, t2                # calculate extended result
     dsllv flag_zc, result, flag_bitsize # affect Z and C flags
     sllv flag_nv, result, flag_bitsize  # affect N flag and reset V flag
-    dsrav t1, flag_nv, t2               # shift back expected sign bits and
-    sllv t0, t0, flag_bitsize           # ...
-    sne t1, t0                          # compare to sign-extended input
-    dsll t1, 63                         # set V flag on mismatch
-    xor flag_nv, t1
+    dsrav t0, flag_nv, t2               # shift back expected sign bits and
+    sllv t1, t1, flag_bitsize           # ...
+    sne t0, t1                          # compare to sign-extended input
+    dsll t0, 63                         # set V flag on mismatch
+    xor flag_nv, t0
     beqz t2, 1f                         # affect X flag only if shift amount is 0
     dsrl flag_x, flag_zc, 32
 1:  jr ra
 
 OP(asr_rmwimpl):
-    sllv flag_nv, t0, flag_bitsize      # set N flag to sign of input, reset V flag
+    sllv flag_nv, t1, flag_bitsize      # set N flag to sign of input, reset V flag
     dsll result, flag_nv, 32            # align input to the upper bits
     dsrav result, result, t2            # arithmetic shift right
     dsrlv result, result, flag_bitsize  # align result to bit 32, carry to bit 31
