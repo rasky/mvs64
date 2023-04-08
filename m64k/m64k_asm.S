@@ -27,7 +27,7 @@ optable8:
     .long   op_ori,   op8_0001, op_andi,  op8_0011, op_subi,  op8_0101, op_addi,  op8_0111
     .long   op8_1000, op8_1001, op_eori,  op8_1011, op8_1100, op8_1101, op8_1110, op8_1111
 optable4:
-    .long   op_mvfsr, op_lea,   op4_0010, op_lea,   op_mvccr, op_lea,   op_mvtsr, op_lea
+    .long   op_mvfsr, op_lea,   op_clr,   op_lea,   op_neg,   op_lea,   op_not,   op_lea
     .long   op_pea,   op_lea,   op4_1010, op_lea,   op4_1100, op_lea,   op_tbl4e, op_lea
 optable4e:
     .long   op4e_0000, op4e_0001, op4e_0010, op4e_0011, op4e_0100, op_link,   op_mvusp,  op4e_0111    
@@ -40,6 +40,8 @@ opbitsmem:
     .long   opm_1000, opm_1001, opm_1010, opm_1011, opm_1100, opm_1101, opm_1110, opm_1111
 
     .text
+
+#define ALIGN(lbl)  .balign 32; lbl
 
 #define OP(x)       .balign 32; op_##x
 #define m64k        a0
@@ -172,7 +174,7 @@ _m64k_asmrun:
     jal reload_sr
     nop
 
-main_loop:
+ALIGN(main_loop):
     blez m_cycles, main_loop_exit
     lhu opcode, 0(m_pc)
     #if M64K_CONFIG_ADDRERR
@@ -191,13 +193,13 @@ op_tbl8:
     andi t0, 0xF << 2
     lw t0, optable8(t0)
     jr t0
-    nop
+    li opsize, 0
 OP(tbl4):
     srl t0, opcode, 6
     andi t0, 0xF << 2
     lw t0, optable4(t0)
     jr t0
-    nop
+    li opsize, 0
 OP(tbl4e):
     srl t0, opcode, 2
     andi t0, 0xF << 2
@@ -377,6 +379,8 @@ compute_fc:
     beq t0, 0x9108, addrerr_fixup_addq  # Fixup for SUBX pre-decrement
     andi t0, opcode, 0xFFC0
     beq t0, 0x40C0, addrerr_fixup_mvfsr
+    andi t0, opcode, 0xFF00
+    beq t0, 0x4200, addrerr_fixup_clr
     j main_loop_exit
 
 addrerr_fixup_addq:
@@ -497,6 +501,7 @@ addrerr_fixup_move_longabs2:
     addi m_pc, 2
     j main_loop_exit
 
+addrerr_fixup_clr:
 addrerr_fixup_mvfsr:
     lw_m64k t0, M64K_OFF_PENDINGEXC+8  # read FC
     ori t0, 0x10
@@ -522,8 +527,7 @@ privilege_violation_error:
 ###############################################################
 
     .text
-    .balign 32
-decode_imm:
+ALIGN(decode_imm):
     srl t0, opcode, 6
     andi t0, 0x3
     beqz t0, imm_8
@@ -555,11 +559,19 @@ ea_table:
 ea7_table:
     .long   ea7_000, ea7_001, ea7_010, ea7_011, ea7_100, ea7_101, ea7_110, ea7_111
 
+.macro decode_opsize
+    bnez opsize, 1f        # if opsize was not specified
+    srl opsize, opcode, 6  # extract it from opcode bit 6-7
+    andi opsize, 0x3
+    li t0, 1
+    sllv opsize, t0, opsize
+1:
+.endm
+
     .text
-    .balign 32
      # Decode EA. opsize must be set to 1, 2 or 4. 
      # When 0, extracts from opcode
-decode_ea:
+ALIGN(decode_ea):
     andi t1, opcode, 0x7
 decode_ea_customreg:    # Like decode_ea, but t1 is already set to the register to use in decoding
     srl t0, opcode, 1
@@ -571,15 +583,6 @@ ea_111: # Register-less EAs
     lw t1, ea7_table(t1)
     jr t1
     nop
-
-.macro decode_opsize
-    bnez opsize, 1f        # if opsize was not specified
-    srl opsize, opcode, 6  # extract it from opcode bit 6-7
-    andi opsize, 0x3
-    li t0, 1
-    sllv opsize, t0, opsize
-1:
-.endm
 
     .set reorder
 ea_000: # Dn
@@ -695,7 +698,7 @@ rmw_table:
 
     .text
     .set noreorder
-rmw:
+ALIGN(rmw):
     jal decode_ea             # decode EA into eaptr/eaptr32
 rmw_no_ea:
     srl t3, opcode, 4         # extract size+src/dst flag
@@ -986,6 +989,33 @@ op_eor_rmwimpl:
     zx64 flag_zc, flag_nv
     jr ra
 
+OP(not):
+    srl t0, opcode, 6
+    beq t0, 0b0100011011, op_mvtsr
+    ori opcode, 1<<8    # force rmw with eadst
+    lax rmw_op, op_not_rmwimpl
+    move dptr, m64k
+    j rmw
+op_not_rmwimpl:
+    not result, t1
+    sll flag_nv, result, flag_bitsize
+    zx64 flag_zc, flag_nv
+    jr ra
+
+OP(neg):
+    srl t0, opcode, 6
+    beq t0, 0b0100010011, op_mvccr
+    ori opcode, 1<<8    # force rmw with eadst
+    lax rmw_op, op_neg_rmwimpl
+    move dptr, m64k
+    j rmw
+op_neg_rmwimpl:
+    neg result, t1
+    sll t1, flag_bitsize
+    dneg flag_nv, t1
+    sne flag_x, result, zero
+    neg flag_zc, flag_x
+    jr ra
 
 OP(lsli): OP(lsri):
     xori opcode, 1<<3
@@ -1118,6 +1148,28 @@ op_lsl_ea_finish:
     zx64 flag_zc, flag_nv
     dsll t0, flag_x, 32
     or flag_zc, t0
+    j main_loop
+
+OP(clr):
+    jal decode_ea
+    srl t0, opcode, 6
+    andi t0, 3
+    beqz t0, 1f
+    check_addr_error eaptr32, write_address_error
+1:  li flag_nv, 0
+    li flag_zc, 0
+    beqz t0, clr_byte
+    addi t0, -1
+    beqz t0, clr_word
+clr_long:
+    swl zero, 0(eaptr)
+    swr zero, 3(eaptr)
+    j main_loop
+clr_word:
+    sh zero, 0(eaptr)
+    j main_loop
+clr_byte:
+    sb zero, 0(eaptr)
     j main_loop
 
 
@@ -1300,8 +1352,6 @@ OP(unlk):
 
     sw t3, (t2)                          # (SP) -> An
     j main_loop
-
-
 
 
 
