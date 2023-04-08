@@ -28,7 +28,7 @@ optable8:
     .long   op8_1000, op8_1001, op_eori,  op8_1011, op8_1100, op8_1101, op8_1110, op8_1111
 optable4:
     .long   op_negx,  op_lea,   op_clr,   op_lea,   op_neg,   op_lea,   op_not,   op_lea
-    .long   op_pea,   op_lea,   op4_1010, op_lea,   op4_1100, op_lea,   op_tbl4e, op_lea
+    .long   op_pea,   op_lea,   op_tst,   op_lea,   op4_1100, op_lea,   op_tbl4e, op_lea
 optable4e:
     .long   op4e_0000, op4e_0001, op4e_0010, op4e_0011, op4e_0100, op_link,   op_mvusp,  op4e_0111    
     .long   op4e_1000, op4e_1001, op4e_1010, op4e_1011, op4e_1100, op4e_1101, op4e_1110, op4e_1111    
@@ -1169,6 +1169,28 @@ clr_byte:
     sb zero, 0(eaptr)
     j main_loop
 
+OP(tst):
+    jal decode_ea
+    srl t0, opcode, 6
+    andi t0, 3
+    beqz t0, tst_byte
+    check_addr_error eaptr32, read_address_error
+    addi t0, -1
+    beqz t0, tst_word
+tst_long:
+    lwl flag_zc, 0(eaptr)
+    lwr flag_zc, 3(eaptr)
+    move flag_nv, flag_zc
+    zx64 flag_zc
+    j main_loop
+tst_word:
+    lhu flag_zc, 0(eaptr)
+    sll flag_nv, flag_zc, 16
+    j main_loop
+tst_byte:
+    lbu flag_zc, 0(eaptr)
+    sll flag_nv, flag_zc, 24
+    j main_loop
 
 OP(moveb):
     li opsize, 1
