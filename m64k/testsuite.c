@@ -209,6 +209,27 @@ int main()
 	}
 #else
     static const char *testfns[] = {
+        // "rom:/RTE.btest",
+        // "rom:/RTR.btest",
+        // "rom:/RTS.btest",
+
+        "rom:/NOP.btest",
+        "rom:/RESET.btest",
+    
+        "rom:/LINK.btest",
+        "rom:/UNLINK.btest",
+
+        "rom:/BSR.btest",
+        "rom:/JMP.btest",
+        "rom:/JSR.btest",
+        "rom:/Bcc.btest",
+        "rom:/Scc.btest",
+
+        "rom:/SWAP.btest",
+
+        "rom:/EXT.l.btest",
+        "rom:/EXT.w.btest",
+
         "rom:/EORItoCCR.btest",
         "rom:/EORItoSR.btest",
         "rom:/ORItoCCR.btest",
@@ -242,8 +263,6 @@ int main()
 
         "rom:/PEA.btest",
         "rom:/LEA.btest",
-        "rom:/LINK.btest",
-        "rom:/UNLINK.btest",
 
         "rom:/AND.b.btest",
         "rom:/AND.l.btest",

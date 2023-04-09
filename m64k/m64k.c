@@ -83,6 +83,9 @@ void m64k_run(m64k_t *m64k, int64_t until)
                 m64k_exception_address(m64k, m64k->pending_exc[1], m64k->pending_exc[2]);
                 break;
             #endif
+            case M64K_PENDINGEXC_RSTO:
+                debugf("[m64k] RSTO asserted\n");
+                break;
             default:
                 assertf(0, "Unhandled pending exception: %ld", m64k->pending_exc[0]);
             }

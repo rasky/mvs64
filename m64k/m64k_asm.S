@@ -23,18 +23,22 @@
      .section .sdata
 pc_diff:      .long 0
 
-optable0:
-    .long   op_tbl8,  op_moveb, op_movel, op_movew, op_tbl4,  op_addq,  op0_0110, op_moveq
+optable:
+    .long   op_tbl0,  op_moveb, op_movel, op_movew, op_tbl4,  op_addq,  op_bcc,   op_moveq
     .long   op_or,    op_sub,   op0_1010, op_eor,   op_and,   op_add,   op_bits,  op0_1111
-optable8:
-    .long   op_ori,   op8_0001, op_andi,  op8_0011, op_subi,  op8_0101, op_addi,  op8_0111
-    .long   op8_1000, op8_1001, op_eori,  op8_1011, op8_1100, op8_1101, op8_1110, op8_1111
+optable0:
+    .long   op_ori,   op0_0001, op_andi,  op0_0011, op_subi,  op0_0101, op_addi,  op0_0111
+    .long   op0_1000, op0_1001, op_eori,  op0_1011, op0_1100, op0_1101, op0_1110, op0_1111
 optable4:
     .long   op_negx,  op_lea,   op_clr,   op_lea,   op_neg,   op_lea,   op_not,   op_lea
     .long   op_pea,   op_lea,   op_tst,   op_lea,   op4_1100, op_lea,   op_tbl4e, op_lea
 optable4e:
-    .long   op4e_0000, op4e_0001, op4e_0010, op4e_0011, op4e_0100, op_link,   op_mvusp,  op4e_0111    
-    .long   op4e_1000, op4e_1001, op4e_1010, op4e_1011, op4e_1100, op4e_1101, op4e_1110, op4e_1111    
+    .long   op4e_0000, op4e_0001, op4e_0010, op4e_0011, op4e_0100, op_link,   op_mvusp,  op_tbl4e7    
+    .long   op_jsr,    op_jsr,    op_jsr,    op_jsr,    op_jmp,    op_jmp,    op_jmp,    op_jmp
+optable4e7:
+    .long   op_reset,  op_nop,    op_stop,   op_rte,    op_rtd,    op_rts,    op_trapv,  op_rtr
+    .long   op_unk,    op_unk,    op_unk,    op_unk,    op_unk,    op_unk,    op_unk,    op_unk
+
 opbits:
     .long   op_asli,  op_lsli,  opb_010,  opb_011
     .long   op_asl,   op_lsl,   opb_110,  opb_111
@@ -182,7 +186,7 @@ _m64k_asmrun:
     jal reload_sr
     nop
 
-ALIGN(main_loop):
+ALIGN(main_loop): OP(nop):
     blez m_cycles, main_loop_exit
     lhu opcode, 0(m_pc)
     #if M64K_CONFIG_ADDRERR
@@ -192,14 +196,14 @@ ALIGN(main_loop):
     lbu t1, 0(t1)
     srl t0, opcode, 12
     sll t0, 2
-    lw t0, optable0(t0)
+    lw t0, optable(t0)
     addi m_pc, 2
     jr t0
     sub m_cycles, t1
-op_tbl8:
+op_tbl0:
     srl t0, opcode, 6
     andi t0, 0xF << 2
-    lw t0, optable8(t0)
+    lw t0, optable0(t0)
     jr t0
     li opsize, 0
 OP(tbl4):
@@ -208,10 +212,16 @@ OP(tbl4):
     lw t0, optable4(t0)
     jr t0
     li opsize, 0
-OP(tbl4e):
+op_tbl4e:
     srl t0, opcode, 2
     andi t0, 0xF << 2
     lw t0, optable4e(t0)
+    jr t0
+    nop
+op_tbl4e7:
+    sll t0, opcode, 2
+    andi t0, 0xF << 2
+    lw t0, optable4e7(t0)
     jr t0
     nop
 OP(bits):
@@ -282,6 +292,7 @@ flush_sr:
     or t1, t0
     sw t1, M64K_OFF_SR(m64k)
 
+flush_sr_chstack:
     srl t0, t1, 11                        # Isolate supervisor bit
     andi t0, 4
     lw_m64k t2, M64K_OFF_AREGS+7*4        # Copy A7 to USP/SSP
@@ -289,6 +300,11 @@ flush_sr:
 
     jr ra   # return SR in t1
     nop
+
+flush_stack:
+    j flush_sr_chstack
+    lw t1, M64K_OFF_SR(m64k)
+
 
     # Reload flag registers from SR bits.
     # Also load the current stack pointer (A7) from USP/SSP
@@ -358,9 +374,12 @@ address_error:
 
     # Check if it's a MOVE. MOVE has 2 EAs and we need to understand whether
     # the read part or the write part is responsible for the address error.
-    lw_m64k t0, M64K_OFF_IR       # Check original opcode
-    andi t0, 0xC000
+    lw_m64k t1, M64K_OFF_IR       # Check original opcode
+    andi t0, t1, 0xC000
     beqz t0, addrerr_fixup_move   # Fixup for MOVE post-decrement
+    andi t0, t1, 0xF000
+    beq t0, 0x6000, addrerr_fixup_bcc  # Fixup for BCC (which doesn't have EA)
+    beq t1, 0x4e73, addrerr_fixup_rte  # Fixup for RTE (which doesn't have EA)
 
 addrerr_fixup_ea:
     # Compute PC offset and FC code from the opcode. Notice that we used the
@@ -380,6 +399,7 @@ compute_fc:
     lb t0, 0(t1)                         # PC offset
     lbu t1, 1(t1)                        # FC code
     add m_pc, t0                         # Rollback PC
+adderr_finish:
     lw_m64k opcode, M64K_OFF_IR          # Restore original opcode
     andi t0, opcode, 0xFFE0
     or t0, t1                            # Merge FC (4 bits) with opcode
@@ -392,8 +412,10 @@ compute_fc:
     beq t0, 0x9108, addrerr_fixup_addq  # Fixup for SUBX pre-decrement
     andi t0, opcode, 0xFFC0
     beq t0, 0x40C0, addrerr_fixup_mvfsr
+    beq t0, 0x4EC0, addrerr_fixup_jmp   # Fixup for JMP
+    beq t0, 0x4E80, addrerr_fixup_jsr   # Fixup for JSR
     andi t0, opcode, 0xFF00
-    beq t0, 0x4200, addrerr_fixup_clr
+    beq t0, 0x4200, addrerr_fixup_clr   # Fixup for CLR
     j main_loop_exit
 
 addrerr_fixup_addq:
@@ -519,6 +541,28 @@ addrerr_fixup_mvfsr:
     lw_m64k t0, M64K_OFF_PENDINGEXC+8  # read FC
     ori t0, 0x10
     sw_m64k t0, M64K_OFF_PENDINGEXC+8  # write FC
+    j main_loop_exit
+
+addrerr_fixup_bcc:
+    li t1, 0xE                               # FC code
+    addi m_pc, -4                            # adjust current PC
+    j adderr_finish
+addrerr_fixup_rte:
+    breakpoint
+    li t1, 0xA                               # FC code
+    addiu m_pc, -4
+    j adderr_finish
+
+addrerr_fixup_jsr:
+    lw_m64k t0, M64K_OFF_AREGS+7*4     # revert SP-=4 performed by JSR
+    addiu t0, 4
+    sw_m64k t0, M64K_OFF_AREGS+7*4
+addrerr_fixup_jmp:
+    lw_m64k t0, M64K_OFF_PENDINGEXC+8  # read FC
+    andi t0, 0xFFF0
+    ori t0, 0xE
+    sw_m64k t0, M64K_OFF_PENDINGEXC+8  # write FC
+    addiu m_pc, -2
     j main_loop_exit
 
     .set noreorder
@@ -791,6 +835,8 @@ invalid_opmode:
     .set reorder
 
 OP(addq): OP(subq):
+    andi t0, opcode, 3<<6
+    beq t0, 3<<6, op_scc
     lax rmw_op, op_subq_rmwimpl
     andi t0, opcode, 1<<8
     bnez t0, 1f
@@ -1350,6 +1396,34 @@ op_eori_sr_impl:
     xor t0, t1
     jr ra
 
+OP(ext):
+    andi dptr, opcode, 7                 # extract dreg index
+    sll dptr, 2
+    andi t0, opcode, 1<<6                # opcode bit 6: 1=word, 0=byte
+    la_m64k dptr, M64K_OFF_DREGS,dptr    # compute dreg address
+    bnez t0, ext_long
+ext_word:
+    lb flag_nv, 3(dptr)                  # extend byte to word
+    sh flag_nv, 2(dptr)
+    zx64 flag_zc, flag_nv
+    j main_loop
+ext_long:
+    lh flag_nv, 2(dptr)                  # extend word to long
+    sw flag_nv, 0(dptr)
+    zx64 flag_zc, flag_nv
+    j main_loop
+
+OP(swap):
+    andi dptr, opcode, 7                 # extract dreg index
+    sll dptr, 2
+    la_m64k dptr, M64K_OFF_DREGS,dptr    # compute dreg address
+    lh t0, 0(dptr)
+    lh flag_nv, 2(dptr)
+    sh t0, 2(dptr)
+    sh flag_nv, 0(dptr)
+    lwu flag_zc, 0(dptr)
+    j main_loop
+
 OP(mvusp):
     lw_m64k t0, M64K_OFF_SR    # Read current SR
     andi t0, 0x2000            # Check supervisor bit
@@ -1367,6 +1441,12 @@ mvusp_read:
     j main_loop
 
 OP(pea):
+    andi t0, opcode, 1<<7
+    bnez t0, op_ext
+    andi t0, opcode, 0b111000
+    beqz t0, op_swap
+    andi t0, opcode, 1<<6
+    beqz t0, op_nbcd
     li opsize, 2
     jal decode_ea
     lw_m64k t0, M64K_OFF_AREGS+7*4
@@ -1386,6 +1466,29 @@ OP(lea):
     sw_m64k eaptr32, M64K_OFF_AREGS,t1
     j main_loop
 
+ALIGN(push32):
+    lw_m64k t1, M64K_OFF_AREGS+7*4
+    addiu t1, -4
+    sw_m64k t1, M64K_OFF_AREGS+7*4
+    check_addr_error t1, write_address_error
+    map_m68k t0, t1
+    jr ra
+
+ALIGN(pop16):
+    li t0, 2
+    j pop_start
+pop32:
+    li t0, 4
+pop_start:
+    lw_m64k t1, M64K_OFF_AREGS+7*4       # read SP
+    check_addr_error t1, read_address_error
+    .set noat
+    addu $1, t1, t0                      # SP += 2/4
+    map_m68k t0, t1
+    sw_m64k $1, M64K_OFF_AREGS+7*4       # write SP
+    .set at
+    jr ra
+
 OP(link):
     andi t2, opcode, 7                 # extract An from opcode
     sll t2, 2
@@ -1394,15 +1497,10 @@ OP(link):
     andi t1, opcode, 1<<3
     bnez t1, op_unlk
 
-    lw_m64k t1, M64K_OFF_AREGS+7*4
-    addiu t1, -4
-    sw_m64k t1, M64K_OFF_AREGS+7*4
-    map_m68k t3, t1
-    check_addr_error t1, write_address_error
-
-    lw t0, 0(t2)    # read An
-    swl t0, 0(t3)   # An -> (SP)
-    swr t0, 3(t3)
+    jal push32
+    lw t3, 0(t2)    # read An
+    swl t3, 0(t0)   # An -> (SP)
+    swr t3, 3(t0)
     sw t1, 0(t2)    # SP -> An
 
     lh t2, 0(m_pc)  # read displacement
@@ -1412,28 +1510,164 @@ OP(link):
     j main_loop
 
 OP(unlk):
-    lw t0, 0(t2)                         # read An
-    sw_m64k t0, M64K_OFF_AREGS+7*4       # An -> SP
-    map_m68k t1, t0
-    check_addr_error t0, read_address_error
-
-    lwl t3, 0(t1)                        # read (SP)
-    lwr t3, 3(t1)                        # read (SP)
-
-    lw_m64k t0, M64K_OFF_AREGS+7*4       # read SP
-    addiu t0, 4                          # SP += 4
-    sw_m64k t0, M64K_OFF_AREGS+7*4       # write SP
-
+    lw t1, 0(t2)                         # read An
+    sw_m64k t1, M64K_OFF_AREGS+7*4       # An -> SP
+    jal pop32
+    lwl t3, 0(t0)                        # read (SP)
+    lwr t3, 3(t0)                        # read (SP)
     sw t3, (t2)                          # (SP) -> An
     j main_loop
+
+OP(jmp):
+    jal decode_ea
+    lw t0, pc_diff
+    addu eaptr32, t0
+jmp_exec:
+    map_m68k m_pc, eaptr32             # map 32-bit target to host pointer
+    sub t0, eaptr32, m_pc              # save new pc_diff
+    sw t0, pc_diff
+    check_addr_error eaptr32, read_address_error
+    j main_loop
+
+OP(jsr):
+    jal decode_ea
+jsr_exec:
+    lw t2, pc_diff
+    addu t2, m_pc
+    jal push32
+    swl t2, 0(t0)
+    swr t2, 3(t0)
+    j jmp_exec
+
+OP(bsr):
+    lb t3, -1(m_pc)                    # fetch signed 8-bit displacement (from opcode)
+    bnez t3, bsr_exec                  # if displacement is 0, there's a 16-bit displacement
+    lh t3, 0(m_pc)                     # fetch 16-bit displacement
+    addiu m_pc, 2
+    addiu t3, -2
+bsr_exec:
+    lw eaptr32, pc_diff                # calculate full 32bit branch target (using pc_diff)
+    addu eaptr32, t3                   
+    addu eaptr32, m_pc
+    j jsr_exec
+
+OP(bcc):
+    andi t0, opcode, 0xFF00
+    beq t0, 0x6100, op_bsr
+    lb t3, -1(m_pc)                    # fetch signed 8-bit displacement (from opcode)
+    bnez t3, bcc_exec                  # if displacement is 0, there's a 16-bit displacement
+bcc_disp_16:
+    lh t3, 0(m_pc)                     # fetch 16-bit displacement
+    addiu m_pc, 2                      # increment PC
+    addiu t3, -2                       # displacement refers to PC before increment
+bcc_exec:
+    jal check_cc
+    beqz t0, main_loop                 # cc is false => branch is not taken
+    lw eaptr32, pc_diff                # calculate full 32bit branch target (using pc_diff)
+    addu eaptr32, t3                   
+    addu eaptr32, m_pc
+    j jmp_exec
+
+OP(scc):
+    li opsize, 1
+    jal decode_ea
+    lb zero, 0(eaptr)                  # dummy fetch (performed by m68k)
+    jal check_cc
+    neg t0                             # convert 0x01 into 0xFF
+    sb t0, 0(eaptr)                    # store result
+    j main_loop
+
+    .section .sdata
+opcctable:
+    .long   cc_t, cc_hi, cc_cc, cc_ne, cc_vc, cc_pl, cc_ge, cc_gt
+
+    .text
+ALIGN(check_cc):
+    srl t0, opcode, 7
+    andi t0, 0x7<<2
+    lw t0, opcctable(t0)               # fetch condition code function pointer
+    srl t2, opcode, 8
+    andi t2, 1                         # t2=1 => invert branch condition
+    jr t0                              # call condition code function
+    # Condition codes checking functions
+    # Input: t2 => 0: standard chaeck, 1: inverted chack
+    # Output: t0 => 0: branch not taken, 1: branch taken
+cc_t:  # true
+    xori t0, t2, 1
+    jr ra
+cc_cc: # carry clear (C == 0)
+    dsrl t0, flag_zc, 32
+    andi t0, 1
+    seq t0, t2
+    jr ra
+cc_ne: # not equal (Z == 0)
+    zx64 t0, flag_zc
+    seq t0, zero
+    seq t0, t2
+    jr ra
+cc_pl: # plus (N == 0)
+    srl t0, flag_nv, 31
+    seq t0, t2
+    jr ra
+cc_hi: # hi (C==0 && Z==0)
+    zx64 t0, flag_zc
+    seq t0, zero
+    dsrl t1, flag_zc, 32
+    andi t1, 1
+    or t0, t1
+    seq t0, t2
+    jr ra
+cc_vc: # overflow clear (V == 0)
+    dsrl t0, flag_nv, 63
+    srl t1, flag_nv, 31
+    xor t0, t1
+    seq t0, t2
+    jr ra
+cc_ge: # greater equal (N == V) 
+    sge t0, flag_nv, zero
+    xor t0, t2
+    jr ra
+cc_gt: # greater than (N == V && Z == 0)
+    sge t0, flag_nv, zero
+    zx64 t1, flag_zc
+    sne t1, zero
+    and t0, t1
+    xor t0, t2
+    jr ra
+
+ OP(reset):
+    lw_m64k t0, M64K_OFF_SR             # fetch SR
+    andi t0, 0x2000                     # check supervistor bot
+    beqz t0, main_loop                  # FIXME: trap?
+    addiu m_cycles, -128
+    li t0, M64K_PENDINGEXC_RSTO
+    sw_m64k t0, M64K_OFF_PENDINGEXC     # exit with code M64K_PENDINGEXC_RSTO
+    j main_loop_exit
+
+OP(rte):
+    breakpoint
+    lw_m64k t0, M64K_OFF_SR             # fetch SR
+    andi t0, 0x2000                     # check supervistor bot
+    beqz t0, main_loop                  # FIXME: trap?
+    li t0, 6
+    jal pop_start
+    move eaptr, t0
+    jal flush_stack
+    lhu t0, 0(eaptr)
+    andi t0, SR_MASK
+    sw_m64k t0, M64K_OFF_SR
+    lwl eaptr32, 2(eaptr)
+    lwr eaptr32, 5(eaptr)
+    jal_and_j reload_sr, jmp_exec
+
 
 
 
                                         op0_0100: op0_0101: op0_0110: op0_0111:
 op0_1000: op0_1001: op0_1010: op0_1011:           op0_1101: op0_1110: op0_1111:
 
-op8_0000: op8_0001:           op8_0011: op8_0100: op8_0101: op8_0110: op8_0111:
-op8_1000: op8_1001: op8_1010: op8_1011: op8_1100: op8_1101: op8_1110: op8_1111:
+op0_0000: op0_0001:           op0_0011: op0_0100: op0_0101: op0_0110: op0_0111:
+op0_1000: op0_1001: op0_1010: op0_1011: op0_1100: op0_1101: op0_1110: op0_1111:
 
 op4_0000: op4_0001: op4_0010: op4_0011: op4_0100: op4_0101: op4_0110: op4_0111:
 op4_1000: op4_1001: op4_1010: op4_1011: op4_1100: op4_1101: op4_1110: op4_1111:
@@ -1446,7 +1680,8 @@ opm_1000: opm_1001: opm_1010: opm_1011: opm_1100: opm_1101: opm_1110: opm_1111:
 
 op4e_0000: op4e_0001: op4e_0010: op4e_0011: op4e_0100:                       op4e_0111:
 op4e_1000: op4e_1001: op4e_1010: op4e_1011: op4e_1100: op4e_1101: op4e_1110: op4e_1111:
-
+op_nbcd: op_trapv: op_stop: op_rtd: op_rts: op_trapv: op_rtr:
+op_unk:
     move a0, opcode
     jal __m64k_assert_invalid_opcode
     addiu a1, m_pc, -2
