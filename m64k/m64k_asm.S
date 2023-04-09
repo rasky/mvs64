@@ -2,6 +2,9 @@
 #include "m64k_internal.h"
 #include "m64k_config.h"
 
+#define SR_MASK    0xA71F
+#define CCR_MASK   0x1F
+
     .set noreorder
 
 .macro check_addr_error reg, label
@@ -63,8 +66,9 @@ opbitsmem:
 #define eaptr32       t4
 #define m_pc          t5
 #define m_cyc_table   t6
-#define rmw_op        t7
-#define flag_bitsize  t8
+#define rmw_op        t7    // RMW pointer to implementation function
+#define rmw_bitsize   t8    // RMW bitsize value useful in flag calcuation (24, 16, 0)
+#define rmw_srmask    t8    // for SR RMWs, it contains the mask for SR bits to be written
 
 .macro la_m64k  reg, offset,base
     add \reg, m64k, \base
@@ -250,8 +254,10 @@ main_loop_exit:
     jr ra
     move v0, m_cycles
 
+    # Store flags into SR (preserving other SR bits)
+    # Also store the current stack pointer (A7) into USP/SSP
+    # Destroy: t0, t1, t2
 flush_sr:
-    # Store flags into SR
     dsrl t0, flag_nv, 63    # N^V
     srl t1, flag_nv, 31     # N
     xor t0, t1              # V
@@ -284,8 +290,11 @@ flush_sr:
     jr ra   # return SR in t1
     nop
 
-
-reload_sr: # t0 = SR
+    # Reload flag registers from SR bits.
+    # Also load the current stack pointer (A7) from USP/SSP
+    # Input: t0: SR
+    # Destroy: t0, t1, t2
+reload_sr: 
     # Extract flags from SR into flag_nv / flag_zc
     # SR Format: ---X NZVC
     srl flag_x, t0, 4          # X to bit 0
@@ -564,15 +573,19 @@ ea7_table:
     .long   ea7_000, ea7_001, ea7_010, ea7_011, ea7_100, ea7_101, ea7_110, ea7_111
 
 .macro decode_opsize
+    .set noat
     bnez opsize, 1f        # if opsize was not specified
     srl opsize, opcode, 6  # extract it from opcode bit 6-7
     andi opsize, 0x3
-    li t0, 1
-    sllv opsize, t0, opsize
+    li $1, 1
+    sllv opsize, $1, opsize
+    .set at
 1:
 .endm
 
     .text
+    .set reorder
+
      # Decode EA. opsize must be set to 1, 2 or 4. 
      # When 0, extracts from opcode
 ALIGN(decode_ea):
@@ -581,14 +594,12 @@ decode_ea_customreg:    # Like decode_ea, but t1 is already set to the register 
     srl t0, opcode, 1
     andi t0, 0x7 << 2
     lw t0, ea_table(t0)
-    jr t0
     sll t1, 2
+    jr t0
 ea_111: # Register-less EAs
     lw t1, ea7_table(t1)
     jr t1
-    nop
 
-    .set reorder
 ea_000: # Dn
     decode_opsize
     la_m64k eaptr, M64K_OFF_DREGS+4,t1
@@ -714,7 +725,7 @@ rmw_no_ea:
     nop
     .set reorder
 rmw8_easrc:
-    li flag_bitsize, 24
+    li rmw_bitsize , 24
     lbu t0, 0(eaptr)
     lbu t1, 3(dptr)
     jalr rmw_op
@@ -722,7 +733,7 @@ rmw8_easrc:
     j main_loop
 rmw16_easrc:
     check_addr_error eaptr32, read_address_error
-    li flag_bitsize, 16
+    li rmw_bitsize , 16
     lhu t0, 0(eaptr)
     lhu t1, 2(dptr)
     jalr rmw_op
@@ -730,7 +741,7 @@ rmw16_easrc:
     j main_loop
 rmw32_easrc:
     check_addr_error eaptr32, read_address_error
-    li flag_bitsize, 0
+    li rmw_bitsize , 0
     lwl t0, 0(eaptr)
     lwr t0, 3(eaptr)
     lwu t1, 0(dptr)
@@ -739,7 +750,7 @@ rmw32_easrc:
     sw result, 0(dptr)
     j main_loop
 rmw8_eadst:
-    li flag_bitsize, 24
+    li rmw_bitsize , 24
     lbu t0, 3(dptr)
     lbu t1, 0(eaptr)
     jalr rmw_op
@@ -747,7 +758,7 @@ rmw8_eadst:
     j main_loop
 rmw16_eadst:
     check_addr_error eaptr32, read_address_error
-    li flag_bitsize, 16
+    li rmw_bitsize , 16
     lhu t0, 2(dptr)
     lhu t1, 0(eaptr)
     jalr rmw_op
@@ -755,7 +766,7 @@ rmw16_eadst:
     j main_loop
 rmw32_eadst:
     check_addr_error eaptr32, read_address_error
-    li flag_bitsize, 0
+    li rmw_bitsize , 0
     lwl t0, 0(dptr)   # NOTE: this is to handle immediate case (where dptr is PC-relative)
     lwr t0, 3(dptr)
     lwl t1, 0(eaptr)
@@ -829,10 +840,10 @@ OP(add):
 op_add_rmwimpl:
     daddu result, t0, t1
 op_add_rmwimpl_flags:
-    dsll flag_zc, result, flag_bitsize
+    dsll flag_zc, result, rmw_bitsize 
     dsrl flag_x, flag_zc, 32
-    sllv t0, t0, flag_bitsize
-    sllv t1, t1, flag_bitsize
+    sllv t0, t0, rmw_bitsize 
+    sllv t1, t1, rmw_bitsize 
     daddu flag_nv, t0, t1
     jr ra
 
@@ -852,10 +863,10 @@ OP(sub):
 op_sub_rmwimpl:
     dsubu result, t1, t0
 op_sub_rmwimpl_flags:
-    dsll flag_zc, result, flag_bitsize
+    dsll flag_zc, result, rmw_bitsize 
     dsrl flag_x, flag_zc, 32
-    sllv t0, t0, flag_bitsize
-    sllv t1, t1, flag_bitsize
+    sllv t0, t0, rmw_bitsize 
+    sllv t1, t1, rmw_bitsize 
     dsubu flag_nv, t1, t0
     jr ra
 
@@ -891,11 +902,11 @@ op_addx_rmwimpl:
     zx64 t2, flag_zc                     # put current Z flag (without C) into t2
     daddu result, t0, t1                 # compute full size result
     daddu result, flag_x                 # add flag_x
-    dsll flag_zc, result, flag_bitsize   # compute new flag_zc
+    dsll flag_zc, result, rmw_bitsize    # compute new flag_zc
     or flag_zc, t2                       # combine with old Z flag
-    sllv t0, t0, flag_bitsize            # put operands into MSB
-    sllv t1, t1, flag_bitsize
-    sllv flag_x, flag_x, flag_bitsize
+    sllv t0, t0, rmw_bitsize             # put operands into MSB
+    sllv t1, t1, rmw_bitsize 
+    sllv flag_x, flag_x, rmw_bitsize 
     daddu flag_nv, t0, t1                # compute flag_nv
     daddu flag_nv, flag_x
     dsrl flag_x, flag_zc, 32             # copy new carry bit into flag_x
@@ -905,11 +916,11 @@ OP(subx_rmwimpl):
     zx64 t2, flag_zc                     # put current Z flag (without C) into t2
     dsubu result, t1, t0                 # compute full size result
     dsubu result, flag_x                 # subtract flag_x
-    dsll flag_zc, result, flag_bitsize   # compute new flag_zc
+    dsll flag_zc, result, rmw_bitsize    # compute new flag_zc
     or flag_zc, t2                       # combine with old Z flag
-    sllv t0, t0, flag_bitsize            # put operands into MSB
-    sllv t1, t1, flag_bitsize
-    sllv flag_x, flag_x, flag_bitsize
+    sllv t0, t0, rmw_bitsize             # put operands into MSB
+    sllv t1, t1, rmw_bitsize 
+    sllv flag_x, flag_x, rmw_bitsize 
     dsubu flag_nv, t1, t0                # compute flag_nv
     dsubu flag_nv, flag_x
     dsrl flag_x, flag_zc, 32             # copy new carry bit into flag_x
@@ -952,30 +963,37 @@ OP(group_logical):
     j rmw
 
 OP(andi):
+    andi t0, opcode, 0b111111
+    beq t0, 0b111100, op_andi_sr
     lax rmw_op, op_and_rmwimpl
     jal_and_j decode_imm, rmw_eadst
+OP(ori):
+    andi t0, opcode, 0b111111
+    beq t0, 0b111100, op_ori_sr
+    lax rmw_op, op_or_rmwimpl
+    jal_and_j decode_imm, rmw_eadst
+
 OP(and):
     lax rmw_op, op_and_rmwimpl
     j op_group_logical
 op_and_rmwimpl:
     and result, t0, t1
-    sllv flag_nv, result, flag_bitsize
+    sllv flag_nv, result, rmw_bitsize 
     zx64 flag_zc, flag_nv
     jr ra
 
-OP(ori):
-    lax rmw_op, op_or_rmwimpl
-    jal_and_j decode_imm, rmw_eadst
 OP(or):
     lax rmw_op, op_or_rmwimpl
     j op_group_logical
 op_or_rmwimpl:
     or result, t0, t1
-    sllv flag_nv, result, flag_bitsize
+    sllv flag_nv, result, rmw_bitsize 
     zx64 flag_zc, flag_nv
     jr ra
 
 OP(eori):
+    andi t0, opcode, 0b111111
+    beq t0, 0b111100, op_eori_sr
     lax rmw_op, op_eor_rmwimpl
     jal_and_j decode_imm, rmw_eadst
 OP(eor):
@@ -983,7 +1001,7 @@ OP(eor):
     j op_group_logical
 op_eor_rmwimpl:
     xor result, t0, t1
-    sllv flag_nv, result, flag_bitsize
+    sllv flag_nv, result, rmw_bitsize 
     zx64 flag_zc, flag_nv
     jr ra
 
@@ -994,7 +1012,7 @@ OP(not):
     j rmw_eadst
 op_not_rmwimpl:
     not result, t1
-    sll flag_nv, result, flag_bitsize
+    sll flag_nv, result, rmw_bitsize 
     zx64 flag_zc, flag_nv
     jr ra
 
@@ -1048,8 +1066,8 @@ OP(lsl): OP(lsr):
     j asl_start
 OP(lsl_rmwimpl):
     dsllv result, t1, t2                # calculate extended result
-    dsllv flag_zc, result, flag_bitsize # affect Z and C flags
-    sllv flag_nv, result, flag_bitsize  # affect N flag and reset V flag
+    dsllv flag_zc, result, rmw_bitsize  # affect Z and C flags
+    sllv flag_nv, result, rmw_bitsize   # affect N flag and reset V flag
     beqz t2, 1f                         # affect X flag only if shift amount is 0
     dsrl flag_x, flag_zc, 32
 1:  jr ra
@@ -1059,7 +1077,7 @@ OP(lsr_rmwimpl):
     dsrlv flag_zc, t1, t0               # shift one less (last bit = carry)
     dsll flag_zc, 32                    # extract carry bit
     or flag_zc, result                  # combine with zero bit
-    sll flag_nv, result, flag_bitsize   # set N to result sign and reset V
+    sll flag_nv, result, rmw_bitsize    # set N to result sign and reset V
     beqz t2, 1f                         # affect X flag only if shift amount is 0
     dsrl flag_x, flag_zc, 32
 1:  jr ra
@@ -1080,10 +1098,10 @@ asl_start:
 
 OP(asl_rmwimpl):    
     dsllv result, t1, t2                # calculate extended result
-    dsllv flag_zc, result, flag_bitsize # affect Z and C flags
-    sllv flag_nv, result, flag_bitsize  # affect N flag and reset V flag
+    dsllv flag_zc, result, rmw_bitsize  # affect Z and C flags
+    sllv flag_nv, result, rmw_bitsize   # affect N flag and reset V flag
     dsrav t0, flag_nv, t2               # shift back expected sign bits and
-    sllv t1, t1, flag_bitsize           # ...
+    sllv t1, t1, rmw_bitsize            # ...
     sne t0, t1                          # compare to sign-extended input
     dsll t0, 63                         # set V flag on mismatch
     xor flag_nv, t0
@@ -1092,10 +1110,10 @@ OP(asl_rmwimpl):
 1:  jr ra
 
 OP(asr_rmwimpl):
-    sllv flag_nv, t1, flag_bitsize      # set N flag to sign of input, reset V flag
+    sllv flag_nv, t1, rmw_bitsize       # set N flag to sign of input, reset V flag
     dsll result, flag_nv, 32            # align input to the upper bits
     dsrav result, result, t2            # arithmetic shift right
-    dsrlv result, result, flag_bitsize  # align result to bit 32, carry to bit 31
+    dsrlv result, result, rmw_bitsize   # align result to bit 32, carry to bit 31
     dsrl flag_zc, result, 31            # extract carry bit
     dsll flag_zc, 32
     dsrl result, 32                     # align result to bit 0, zero-extended
@@ -1277,12 +1295,11 @@ OP(mvccr):
     jal flush_sr
     lw_m64k t1, M64K_OFF_SR
     lhu t0, 0(eaptr)
-    and t1, 0xA700
-    and t0, 0x1F
+    and t1, SR_MASK ^ CCR_MASK
+    and t0, CCR_MASK
     or t0, t1
     sw_m64k t0, M64K_OFF_SR
-    jal reload_sr
-    j main_loop
+    jal_and_j reload_sr, main_loop
 
 OP(mvtsr):
     li opsize, 2
@@ -1290,10 +1307,48 @@ OP(mvtsr):
     check_addr_error eaptr32, read_address_error
     jal flush_sr
     lhu t0, 0(eaptr)
-    and t0, 0xA71F
+    and t0, SR_MASK
     sw_m64k t0, M64K_OFF_SR
-    jal reload_sr
-    j main_loop
+    jal_and_j reload_sr, main_loop
+
+OP(rmw_sr_imm):
+    andi t0, opcode, 1<<6
+    bnez t0, rmw_sr_full
+    li rmw_srmask, CCR_MASK
+    j rmw_sr_start
+rmw_sr_full:
+    li rmw_srmask, SR_MASK
+rmw_sr_start:
+    add m_pc, 2
+    jal flush_sr
+    lhu t0, -2(m_pc)
+    lw_m64k t1, M64K_OFF_SR
+    jal rmw_op
+    sw_m64k t0, M64K_OFF_SR
+    jal_and_j reload_sr, main_loop
+
+OP(andi_sr):
+    lax rmw_op, op_andi_sr_impl
+    j op_rmw_sr_imm
+op_andi_sr_impl:
+    not rmw_srmask
+    or t0, rmw_srmask
+    and t0, t1
+    jr ra
+OP(ori_sr):
+    lax rmw_op, op_ori_sr_impl
+    j op_rmw_sr_imm
+op_ori_sr_impl:
+    and t0, rmw_srmask
+    or t0, t1
+    jr ra
+OP(eori_sr):
+    lax rmw_op, op_eori_sr_impl
+    j op_rmw_sr_imm
+op_eori_sr_impl:
+    and t0, rmw_srmask
+    xor t0, t1
+    jr ra
 
 OP(mvusp):
     lw_m64k t0, M64K_OFF_SR    # Read current SR

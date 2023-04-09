@@ -209,6 +209,18 @@ int main()
 	}
 #else
     static const char *testfns[] = {
+        "rom:/EORItoCCR.btest",
+        "rom:/EORItoSR.btest",
+        "rom:/ORItoCCR.btest",
+        "rom:/ORItoSR.btest",
+        "rom:/ANDItoCCR.btest",
+        "rom:/ANDItoSR.btest",
+        "rom:/MOVEfromSR.btest",
+        "rom:/MOVEfromUSP.btest",
+        "rom:/MOVEtoSR.btest",
+        "rom:/MOVEtoUSP.btest",
+        "rom:/MOVEtoCCR.btest",
+
         "rom:/TST.b.btest",
         "rom:/TST.l.btest",
         "rom:/TST.w.btest",
@@ -280,11 +292,6 @@ int main()
         "rom:/MOVE.q.btest",
         "rom:/MOVEA.w.btest",
         "rom:/MOVEA.l.btest",
-        "rom:/MOVEfromSR.btest",
-        "rom:/MOVEfromUSP.btest",
-        "rom:/MOVEtoSR.btest",
-        "rom:/MOVEtoUSP.btest",
-        "rom:/MOVEtoCCR.btest",
     };
     int num_tests = sizeof(testfns)/sizeof(testfns[0]);
 #endif
