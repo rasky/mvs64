@@ -274,6 +274,7 @@ main_loop_exit:
     # Store flags into SR (preserving other SR bits)
     # Also store the current stack pointer (A7) into USP/SSP
     # Destroy: t0, t1, t2
+    # Return: t1 = SR
 flush_sr:
     dsrl t0, flag_nv, 63    # N^V
     srl t1, flag_nv, 31     # N
@@ -295,7 +296,7 @@ flush_sr:
     or t0, t1
     
     lw t1, M64K_OFF_SR(m64k)
-    and t1, ~0x1f
+    and t1, ~CCR_MASK
     or t1, t0
     sw t1, M64K_OFF_SR(m64k)
 
@@ -308,7 +309,9 @@ flush_sr_chstack:
     jr ra   # return SR in t1
     nop
 
-flush_stack:
+    # Store the current stack pointer (A7) into USP/SSP
+    # Return: t1 = SR
+flush_stack: 
     j flush_sr_chstack
     lw t1, M64K_OFF_SR(m64k)
 
@@ -395,6 +398,8 @@ address_error:
     beq t0, 0x3000, addrerr_fixup_move # Fixup for MOVE (src/dst EA)
     beq t0, 0x6000, addrerr_fixup_bcc  # Fixup for BCC (which doesn't have EA)
     beq t1, 0x4e73, addrerr_fixup_rte  # Fixup for RTE (which doesn't have EA)
+    beq t1, 0x4e75, addrerr_fixup_rts  # Fixup for RTS (which doesn't have EA)
+    beq t1, 0x4e77, addrerr_fixup_rtr  # Fixup for RTR (which doesn't have EA)
 
 addrerr_fixup_ea:
     # Compute PC offset from the opcode. Notice that we used the
@@ -544,9 +549,9 @@ addrerr_fixup_move_longabs2:
 
 addrerr_fixup_bcc:
 addrerr_fixup_rte:
+addrerr_fixup_rts:
+addrerr_fixup_rtr:
     addi m_pc, -4                            # adjust current PC
-    j adderr_finish
-    addiu m_pc, -4
     j adderr_finish
 
 addrerr_fixup_jsr:
@@ -1537,6 +1542,12 @@ jsr_exec:
     swr t2, 3(t0)
     j jmp_exec
 
+OP(rts):
+    jal pop32
+    lwl eaptr32, 0(t0)
+    lwr eaptr32, 3(t0)
+    j jmp_exec
+
 OP(bsr):
     lb t3, -1(m_pc)                    # fetch signed 8-bit displacement (from opcode)
     bnez t3, bsr_exec                  # if displacement is 0, there's a 16-bit displacement
@@ -1640,20 +1651,26 @@ cc_gt: # greater than (N == V && Z == 0)
     sw_m64k t0, M64K_OFF_PENDINGEXC     # exit with code M64K_PENDINGEXC_RSTO
     j main_loop_exit
 
-OP(rte):
+OP(rtr):
+    li rmw_srmask, CCR_MASK
+    j rte_exec
+op_rte:
+    li rmw_srmask, SR_MASK
     check_supervisor
+rte_exec:
     li t0, 6                            # pop 6 bytes from the stack
     jal popn
     move eaptr, t0                      # store pointer to frame in eaptr
-    jal flush_stack                     # store current stack pointer to USP/SSP
+    jal flush_stack                     # store current stack pointer to USP/SSP, return t1=SR
     lhu t0, 0(eaptr)                    # read SR from stack
-    andi t0, SR_MASK
+    and t0, rmw_srmask
+    not rmw_srmask
+    and t1, rmw_srmask
+    or t0, t1
     sw_m64k t0, M64K_OFF_SR
     lwl eaptr32, 2(eaptr)               # read PC from stack
     lwr eaptr32, 5(eaptr)
     jal_and_j reload_sr, jmp_exec       # reload flags/A7 using SR, and then jump to new PC
-
-
 
 
                                         op0_0100: op0_0101: op0_0110: op0_0111:
@@ -1673,7 +1690,7 @@ opm_1000: opm_1001: opm_1010: opm_1011: opm_1100: opm_1101: opm_1110: opm_1111:
 
 op4e_0000: op4e_0001: op4e_0010: op4e_0011: op4e_0100:                       op4e_0111:
 op4e_1000: op4e_1001: op4e_1010: op4e_1011: op4e_1100: op4e_1101: op4e_1110: op4e_1111:
-op_nbcd: op_trapv: op_stop: op_rtd: op_rts: op_trapv: op_rtr:
+op_nbcd: op_trapv: op_stop: op_rtd: op_trapv:
 op_unk:
     move a0, opcode
     jal __m64k_assert_invalid_opcode
