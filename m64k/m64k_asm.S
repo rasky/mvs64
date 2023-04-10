@@ -2,6 +2,7 @@
 #include "m64k_internal.h"
 #include "m64k_config.h"
 
+#define SR_SUPERV  0x2000
 #define SR_MASK    0xA71F
 #define CCR_MASK   0x1F
 
@@ -13,6 +14,12 @@
     andi $1, \reg, 1
     bnez $1, \label
     .set at
+    #endif
+.endm
+
+.macro check_supervisor
+    #if M64K_CONFIG_PRIVERR
+    jal check_supervisor
     #endif
 .endm
 
@@ -354,19 +361,26 @@ reload_sr:
 
 #if M64K_CONFIG_ADDRERR
     .data 
-    # Table to help setting up address error. Each entry is a pair of
-    # 8-bit values, first is the PC offset to rollback, second is the
-    # "FC" code which is put into the stack frame.
-addrerr_pcoff:  .byte  0,0,  0,0, -2,5, -2,5, -2,5, -2,5, -2,5,  0,0
-addrerr7_pcoff: .byte -2,5, -2,5, -2,5, -2,5,  0,0,  0,0,  0,0,  0,0
+    # Table to help setting up address error. Each entry is the PC offset to rollback.
+addrerr_pcoff:  .byte  0,  0, -2, -2, -2, -2, -2,  0
+addrerr7_pcoff: .byte -2, -2, -2, -2,  0,  0,  0,  0
+
+#define FC_DATA     1         // Error while accessing data
+#define FC_PROGRAM  2         // Error while fetching code
+#define FC_SUPERV   4         // Error while in supervisor mode
+#define FC_NONOP    8         // Error happened outside of opcode execution
+#define FC_READ     16        // Error while reading from the bus
 
     .text
     .set reorder
+pc_address_error:
+    li t2, FC_READ | FC_PROGRAM | FC_NONOP
+    j address_error
 read_address_error:
-    li t2, 1<<4
+    li t2, FC_READ | FC_DATA
     j address_error
 write_address_error:
-    li t2, 0
+    li t2, FC_DATA
 address_error:
     li t0, M64K_PENDINGEXC_ADDRERR
     sw_m64k t0, M64K_OFF_PENDINGEXC+0
@@ -375,47 +389,44 @@ address_error:
     # Check if it's a MOVE. MOVE has 2 EAs and we need to understand whether
     # the read part or the write part is responsible for the address error.
     lw_m64k t1, M64K_OFF_IR       # Check original opcode
-    andi t0, t1, 0xC000
-    beqz t0, addrerr_fixup_move   # Fixup for MOVE post-decrement
     andi t0, t1, 0xF000
+    beq t0, 0x1000, addrerr_fixup_move # Fixup for MOVE (src/dst EA)
+    beq t0, 0x2000, addrerr_fixup_move # Fixup for MOVE (src/dst EA)
+    beq t0, 0x3000, addrerr_fixup_move # Fixup for MOVE (src/dst EA)
     beq t0, 0x6000, addrerr_fixup_bcc  # Fixup for BCC (which doesn't have EA)
     beq t1, 0x4e73, addrerr_fixup_rte  # Fixup for RTE (which doesn't have EA)
 
 addrerr_fixup_ea:
-    # Compute PC offset and FC code from the opcode. Notice that we used the
+    # Compute PC offset from the opcode. Notice that we used the
     # "current" opcode that might have been modified by the handler to force
     # a specific EA mode; but this is exactly the one that we should be parsing here.
-    # Fetch the PC/FC table entry using EA
-    srl t0, opcode, 2
-    andi t0, 0x7<<1
-    la t1, addrerr_pcoff
-    bne t0, 7<<1, compute_fc
+    # Fetch the PC table entry using EA
+    srl t0, opcode, 3
+    andi t0, 0x7
+    bne t0, 7, addrerr_adjust_pc
 adderr_off7:
     andi t0, opcode, 7
     addi t0, 8
-    sll t0, 1
-compute_fc:
-    add t1, t0
-    lb t0, 0(t1)                         # PC offset
-    lbu t1, 1(t1)                        # FC code
+addrerr_adjust_pc:
+    lb t0, addrerr_pcoff(t0)             # PC offset
     add m_pc, t0                         # Rollback PC
 adderr_finish:
     lw_m64k opcode, M64K_OFF_IR          # Restore original opcode
     andi t0, opcode, 0xFFE0
-    or t0, t1                            # Merge FC (4 bits) with opcode
-    or t0, t2                            # Merge read/write flag
-    sw_m64k t0, M64K_OFF_PENDINGEXC+8    # Store FC
+    or t0, t2                            # Merge FC code (with read/write flag)
+    lw_m64k t1, M64K_OFF_SR              # Check if we were running in supervisor mode
+    andi t1, SR_SUPERV
+    beqz t1, 1f
+    ori t0, FC_SUPERV                    # Mark supervisor FC bit
+1:  sw_m64k t0, M64K_OFF_PENDINGEXC+8    # Store FC
 
     # Check if we need fixups
     andi t0, opcode, 0xF138              
     beq t0, 0xD108, addrerr_fixup_addq  # Fixup for ADDX pre-decrement
     beq t0, 0x9108, addrerr_fixup_addq  # Fixup for SUBX pre-decrement
     andi t0, opcode, 0xFFC0
-    beq t0, 0x40C0, addrerr_fixup_mvfsr
     beq t0, 0x4EC0, addrerr_fixup_jmp   # Fixup for JMP
     beq t0, 0x4E80, addrerr_fixup_jsr   # Fixup for JSR
-    andi t0, opcode, 0xFF00
-    beq t0, 0x4200, addrerr_fixup_clr   # Fixup for CLR
     j main_loop_exit
 
 addrerr_fixup_addq:
@@ -437,12 +448,7 @@ addrerr_fixup_addq:
     add t0, t1       # adjust LHS to the expected error address
     sw t0, 0(lhs)
     sw_m64k t0, M64K_OFF_PENDINGEXC+4  # store LHS as address error
-
     addi m_pc, -2                      # adjust expected PC
-    lw_m64k t0, M64K_OFF_PENDINGEXC+8  # read FC
-    xori t0, 0x5                       # adjust given that this is a read address exception
-    sw_m64k t0, M64K_OFF_PENDINGEXC+8  # write FC
-
     j main_loop_exit
 
 1:  # rhs is odd and causing exception
@@ -459,8 +465,8 @@ addrerr_fixup_addq:
     #undef rhs
 
 addrerr_fixup_move:
-    andi t2, 1<<4                      # Check if it's a read
-    bnez t2, addrerr_fixup_ea          # If it's a read, do the standard EA fixup
+    andi t0, t2, 1<<4                  # Check if it's a read
+    bnez t0, addrerr_fixup_ea          # If it's a read, do the standard EA fixup
 
     # This is a write exception. We must do fixup based *mainly* on the
     # destination EA, but there are some cases in which the source EA also
@@ -536,20 +542,10 @@ addrerr_fixup_move_longabs2:
     addi m_pc, 2
     j main_loop_exit
 
-addrerr_fixup_clr:
-addrerr_fixup_mvfsr:
-    lw_m64k t0, M64K_OFF_PENDINGEXC+8  # read FC
-    ori t0, 0x10
-    sw_m64k t0, M64K_OFF_PENDINGEXC+8  # write FC
-    j main_loop_exit
-
 addrerr_fixup_bcc:
-    li t1, 0xE                               # FC code
+addrerr_fixup_rte:
     addi m_pc, -4                            # adjust current PC
     j adderr_finish
-addrerr_fixup_rte:
-    breakpoint
-    li t1, 0xA                               # FC code
     addiu m_pc, -4
     j adderr_finish
 
@@ -558,25 +554,29 @@ addrerr_fixup_jsr:
     addiu t0, 4
     sw_m64k t0, M64K_OFF_AREGS+7*4
 addrerr_fixup_jmp:
-    lw_m64k t0, M64K_OFF_PENDINGEXC+8  # read FC
-    andi t0, 0xFFF0
-    ori t0, 0xE
-    sw_m64k t0, M64K_OFF_PENDINGEXC+8  # write FC
     addiu m_pc, -2
     j main_loop_exit
 
     .set noreorder
 #endif
 
-
 ###############################################################
-# Other errors
+# Privilege violation error handling
 ###############################################################
 
-privilege_violation_error:
-    move a0, opcode
-    jal __m64k_assert_privilege_violation
-    addiu a1, m_pc, -2
+check_supervisor:
+    .set reorder
+    .set noat
+    lw_m64k $1, M64K_OFF_SR
+    andi $1, SR_SUPERV
+    bnez $1, 1f
+
+    li $1, M64K_PENDINGEXC_PRIVERR
+    sw_m64k t0, M64K_OFF_PENDINGEXC
+    j main_loop_exit
+1:  jr ra
+    .set at
+    .set noreorder
 
 
 ###############################################################
@@ -1212,26 +1212,14 @@ op_lsl_ea_finish:
     j main_loop
 
 OP(clr):
-    jal decode_ea
-    srl t0, opcode, 6
-    andi t0, 3
-    beqz t0, 1f
-    check_addr_error eaptr32, write_address_error
-1:  li flag_nv, 0
+    ori opcode, 1<<8
+    lax rmw_op, op_clr_rmwimpl
+    j rmw
+op_clr_rmwimpl:
+    li result, 0
+    li flag_nv, 0
     li flag_zc, 0
-    beqz t0, clr_byte
-    addi t0, -1
-    beqz t0, clr_word
-clr_long:
-    swl zero, 0(eaptr)
-    swr zero, 3(eaptr)
-    j main_loop
-clr_word:
-    sh zero, 0(eaptr)
-    j main_loop
-clr_byte:
-    sb zero, 0(eaptr)
-    j main_loop
+    jr ra
 
 OP(tst):
     jal decode_ea
@@ -1327,10 +1315,12 @@ OP(movea32):
     j main_loop
 
 OP(mvfsr):
+    check_supervisor
     li opsize, 2
     jal decode_ea
-    check_addr_error eaptr32, write_address_error
+    check_addr_error eaptr32, read_address_error
     jal flush_sr
+    lh zero, 0(eaptr)            # dummy read before write
     sh t1, 0(eaptr)
     j main_loop
 
@@ -1348,6 +1338,7 @@ OP(mvccr):
     jal_and_j reload_sr, main_loop
 
 OP(mvtsr):
+    check_supervisor
     li opsize, 2
     jal decode_ea
     check_addr_error eaptr32, read_address_error
@@ -1358,20 +1349,21 @@ OP(mvtsr):
     jal_and_j reload_sr, main_loop
 
 OP(rmw_sr_imm):
-    andi t0, opcode, 1<<6
+    andi t0, opcode, 1<<6           # check if the access is just to CCR or the full SR
     bnez t0, rmw_sr_full
-    li rmw_srmask, CCR_MASK
+    li rmw_srmask, CCR_MASK         # use CCR mask to only modify CCR bits
     j rmw_sr_start
 rmw_sr_full:
-    li rmw_srmask, SR_MASK
+    check_supervisor                # SR access requires supervisor mode
+    li rmw_srmask, SR_MASK          # use SR mask to modify all implemented bits in SR
 rmw_sr_start:
     add m_pc, 2
-    jal flush_sr
-    lhu t0, -2(m_pc)
-    lw_m64k t1, M64K_OFF_SR
-    jal rmw_op
-    sw_m64k t0, M64K_OFF_SR
-    jal_and_j reload_sr, main_loop
+    jal flush_sr                    # sync SR with current values of flags / stack pointer
+    lhu t0, -2(m_pc)                # read immediate value
+    lw_m64k t1, M64K_OFF_SR         # load SR
+    jal rmw_op                      # execute operation
+    sw_m64k t0, M64K_OFF_SR         # store modified SR
+    jal_and_j reload_sr, main_loop  # reload flags / stack pointer
 
 OP(andi_sr):
     lax rmw_op, op_andi_sr_impl
@@ -1425,9 +1417,7 @@ OP(swap):
     j main_loop
 
 OP(mvusp):
-    lw_m64k t0, M64K_OFF_SR    # Read current SR
-    andi t0, 0x2000            # Check supervisor bit
-    beqz t0, privilege_violation_error
+    check_supervisor
     andi t0, opcode, 8         # DR bit
     sll t1, opcode, 2          # Isolate register offset
     andi t1, 0x7<<2
@@ -1474,12 +1464,20 @@ ALIGN(push32):
     map_m68k t0, t1
     jr ra
 
+# Pop from the stack:
+#
+# * pop16: pop 16 bits
+# * pop32: pop 32 bits
+# * popn:  pop the number of bytes in t0
+#
+# The function returns the address of the stack slot in t0. The caller
+# must perform the actual read.
 ALIGN(pop16):
     li t0, 2
-    j pop_start
+    j popn
 pop32:
     li t0, 4
-pop_start:
+popn:
     lw_m64k t1, M64K_OFF_AREGS+7*4       # read SP
     check_addr_error t1, read_address_error
     .set noat
@@ -1526,7 +1524,7 @@ jmp_exec:
     map_m68k m_pc, eaptr32             # map 32-bit target to host pointer
     sub t0, eaptr32, m_pc              # save new pc_diff
     sw t0, pc_diff
-    check_addr_error eaptr32, read_address_error
+    check_addr_error eaptr32, pc_address_error
     j main_loop
 
 OP(jsr):
@@ -1636,29 +1634,24 @@ cc_gt: # greater than (N == V && Z == 0)
     jr ra
 
  OP(reset):
-    lw_m64k t0, M64K_OFF_SR             # fetch SR
-    andi t0, 0x2000                     # check supervistor bot
-    beqz t0, main_loop                  # FIXME: trap?
+    check_supervisor
     addiu m_cycles, -128
     li t0, M64K_PENDINGEXC_RSTO
     sw_m64k t0, M64K_OFF_PENDINGEXC     # exit with code M64K_PENDINGEXC_RSTO
     j main_loop_exit
 
 OP(rte):
-    breakpoint
-    lw_m64k t0, M64K_OFF_SR             # fetch SR
-    andi t0, 0x2000                     # check supervistor bot
-    beqz t0, main_loop                  # FIXME: trap?
-    li t0, 6
-    jal pop_start
-    move eaptr, t0
-    jal flush_stack
-    lhu t0, 0(eaptr)
+    check_supervisor
+    li t0, 6                            # pop 6 bytes from the stack
+    jal popn
+    move eaptr, t0                      # store pointer to frame in eaptr
+    jal flush_stack                     # store current stack pointer to USP/SSP
+    lhu t0, 0(eaptr)                    # read SR from stack
     andi t0, SR_MASK
     sw_m64k t0, M64K_OFF_SR
-    lwl eaptr32, 2(eaptr)
+    lwl eaptr32, 2(eaptr)               # read PC from stack
     lwr eaptr32, 5(eaptr)
-    jal_and_j reload_sr, jmp_exec
+    jal_and_j reload_sr, jmp_exec       # reload flags/A7 using SR, and then jump to new PC
 
 
 
