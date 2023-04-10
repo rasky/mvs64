@@ -193,6 +193,11 @@ int main()
 
     dfs_init(DFS_DEFAULT_LOCATION);
 
+    if (!M64K_CONFIG_ADDRERR) {
+        debugf("\nWARNING: this testsuite requires address errors to be emulated.\n");
+        debugf("Make sure to compile M64K with M64K_CONFIG_ADDRERR=1\n\n");
+    }
+
 #if 0
     char* testfns[256];
     int num_tests = 0;
