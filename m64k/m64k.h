@@ -21,5 +21,6 @@ typedef struct {
 void m64k_init(m64k_t *m64k);
 void m64k_run(m64k_t *m64k, int64_t until);
 void m64k_exception_address(m64k_t *m64k, uint32_t address, uint16_t fc);
+void m64k_exception_divbyzero(m64k_t *m64k);
 
 #endif

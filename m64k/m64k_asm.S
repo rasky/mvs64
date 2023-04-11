@@ -397,6 +397,8 @@ address_error:
     beq t0, 0x2000, addrerr_fixup_move # Fixup for MOVE (src/dst EA)
     beq t0, 0x3000, addrerr_fixup_move # Fixup for MOVE (src/dst EA)
     beq t0, 0x6000, addrerr_fixup_bcc  # Fixup for BCC (which doesn't have EA)
+    andi t0, t1, 0xF0F8
+    beq t0, 0x50C8, addrerr_fixup_dbcc # Fixup for DBCC (which doesn't have EA)
     beq t1, 0x4e73, addrerr_fixup_rte  # Fixup for RTE (which doesn't have EA)
     beq t1, 0x4e75, addrerr_fixup_rts  # Fixup for RTS (which doesn't have EA)
     beq t1, 0x4e77, addrerr_fixup_rtr  # Fixup for RTR (which doesn't have EA)
@@ -547,6 +549,7 @@ addrerr_fixup_move_longabs2:
     addi m_pc, 2
     j main_loop_exit
 
+addrerr_fixup_dbcc:
 addrerr_fixup_bcc:
 addrerr_fixup_rte:
 addrerr_fixup_rts:
@@ -766,7 +769,17 @@ rmw_table:
 
     .text
     .set noreorder
-ALIGN(rmw_eadst):
+
+ALIGN(decode_dptr):
+    srl dptr, opcode, 7       # get data register pointer
+    andi dptr, 0x7 << 2       # isolate data register pointer
+    la_m64k dptr, M64K_OFF_DREGS,dptr
+    jr ra
+
+ALIGN(rmw_easrc):
+    andi opcode, 0xFFFF ^ (1<<8)
+    j rmw
+rmw_eadst:
     ori opcode, 1<<8          # force EA mode to EA-dst
 rmw:
     jal decode_ea             # decode EA into eaptr/eaptr32
@@ -882,9 +895,7 @@ op_subi:  # (same cacheline)
 
 OP(add):
     lax rmw_op, op_add_rmwimpl
-    srl dptr, opcode, 7       # get data register pointer
-    andi dptr, 0x7 << 2       # isolate data register pointer
-    la_m64k dptr, M64K_OFF_DREGS,dptr
+    jal decode_dptr
     andi t0, opcode, 0xC0
     beq t0, 0xC0, op_adda     # if adda jump to implementation
     andi t0, opcode, 0x130    # check if the opcode is addx instead
@@ -905,9 +916,7 @@ op_add_rmwimpl_flags:
 OP(sub):
     # check if the opcode is addx instead
     lax rmw_op, op_sub_rmwimpl
-    srl dptr, opcode, 7       # get data register pointer
-    andi dptr, 0x7 << 2       # isolate data register pointer
-    la_m64k dptr, M64K_OFF_DREGS,dptr
+    jal decode_dptr
     andi t0, opcode, 0xC0
     beq t0, 0xC0, op_suba     # if suba jump to implementation
     andi t0, opcode, 0x130
@@ -1009,12 +1018,76 @@ op_adda32_rmwimpl:
 1:  dsubu result, t1, t0
     jr ra
 
+OP(mul):
+    li opsize, 2
+    jal decode_ea
+    check_addr_error eaptr32, read_address_error
+    jal decode_dptr
+    andi t0, opcode, 1<<8
+    bnez t0, op_muls_exec
+op_mulu_exec:
+    lhu t0, 2(dptr)
+    lhu t1, 0(eaptr)
+    multu t0, t1
+    j op_mul_finish
+op_muls_exec:
+    lh t0, 2(dptr)
+    lh t1, 0(eaptr)
+    mult t0, t1
+op_mul_finish:
+    mflo flag_nv
+    zx64 flag_zc, flag_nv
+    sw flag_nv, 0(dptr)
+    j main_loop
+
+OP(div):
+    li opsize, 2
+    jal decode_ea
+    check_addr_error eaptr32, read_address_error
+    jal decode_dptr
+    andi t0, opcode, 1<<8
+    bnez t0, op_divs_exec
+op_divu_exec:
+    lw t0, 0(dptr)
+    lhu t1, 0(eaptr)
+    beqz t1, op_div_byzero
+    divu zero, t0, t1
+    mflo t0
+    and t2, t0, 0xFFFF
+    j op_div_finish
+op_divs_exec:
+    lw t0, 0(dptr)
+    lh t1, 0(eaptr)
+    beqz t1, op_div_byzero
+    div zero, t0, t1
+    mflo t0
+    sll t2, t0, 16
+    sra t2, 16
+op_div_finish:
+    bne t0, t2, op_div_overflow 
+    mfhi t1
+    zx64 flag_zc, t0
+    sll flag_nv, t0, 16
+    sh t1, 0(dptr)
+    sh t0, 2(dptr)
+    j main_loop
+op_div_overflow:
+    dli t0, 1<<63
+    sll flag_nv, 0
+    xor flag_nv, t0
+    zx64 flag_zc
+    j main_loop
+op_div_byzero:
+    li t0, M64K_PENDINGEXC_DIVBYZERO
+    sw_m64k t0, M64K_OFF_PENDINGEXC
+    j main_loop_exit
+
 
 OP(group_logical):
+    li opsize, 0
     srl dptr, opcode, 7       # get data register pointer
     andi dptr, 0x7 << 2
     la_m64k dptr, M64K_OFF_DREGS,dptr
-    li opsize, 0
     j rmw
 
 OP(andi):
@@ -1029,6 +1102,8 @@ OP(ori):
     jal_and_j decode_imm, rmw_eadst
 
 OP(and):
+    andi t0, opcode, 3<<6
+    beq t0, 3<<6, op_mul
     lax rmw_op, op_and_rmwimpl
     j op_group_logical
 op_and_rmwimpl:
@@ -1038,6 +1113,8 @@ op_and_rmwimpl:
     jr ra
 
 OP(or):
+    andi t0, opcode, 3<<6
+    beq t0, 3<<6, op_div
     lax rmw_op, op_or_rmwimpl
     j op_group_logical
 op_or_rmwimpl:
@@ -1574,12 +1651,30 @@ bcc_disp_16:
 bcc_exec:
     jal check_cc
     beqz t0, main_loop                 # cc is false => branch is not taken
+branch_exec:
     lw eaptr32, pc_diff                # calculate full 32bit branch target (using pc_diff)
     addu eaptr32, t3                   
     addu eaptr32, m_pc
     j jmp_exec
 
+OP(dbcc):
+    addiu m_pc, 2
+    jal check_cc
+    bnez t0, main_loop
+    andi t0, opcode, 0x7
+    sll t0, 2
+    la_m64k dptr, M64K_OFF_DREGS,t0
+    lhu t0, 2(dptr)
+    addiu t1, t0, -1
+    sh t1, 2(dptr)
+    beqz t0, main_loop
+    lh t3, -2(m_pc)
+    addiu t3, -2
+    j branch_exec
+
 OP(scc):
+    andi t0, opcode, 0b111000
+    beq t0, 0b001000, op_dbcc
     li opsize, 1
     jal decode_ea
     lb zero, 0(eaptr)                  # dummy fetch (performed by m68k)

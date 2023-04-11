@@ -60,8 +60,22 @@ void m64k_exception_address(m64k_t *m64k, uint32_t address, uint16_t fc)
     exc_push32(m64k, address);
     exc_push16(m64k, fc);
 
-    m64k->pc = RM32(m64k->vbr + 0xC);
-    m64k->cycles += __m64k_exception_cycle_table[0xC / 4];
+    m64k->pc = RM32(m64k->vbr + 0x3*4);
+    m64k->cycles += __m64k_exception_cycle_table[0x3];
+}
+
+void m64k_exception_divbyzero(m64k_t *m64k)
+{
+    uint32_t oldsr = m64k->sr;
+
+    m64k->sr &= ~(SR_T0 | SR_T1);
+    m64k->sr |= SR_S;
+
+    exc_push32(m64k, m64k->pc);
+    exc_push16(m64k, oldsr);
+
+    m64k->pc = RM32(m64k->vbr + 0x5*4);
+    m64k->cycles += __m64k_exception_cycle_table[0x5];
 }
 
 void m64k_init(m64k_t *m64k)
@@ -85,6 +99,10 @@ void m64k_run(m64k_t *m64k, int64_t until)
             #endif
             case M64K_PENDINGEXC_RSTO:
                 debugf("[m64k] RSTO asserted\n");
+                break;
+            case M64K_PENDINGEXC_DIVBYZERO:
+                debugf("[m64k] division by zero\n");
+                m64k_exception_divbyzero(m64k);
                 break;
             default:
                 assertf(0, "Unhandled pending exception: %ld", m64k->pending_exc[0]);

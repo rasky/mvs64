@@ -214,6 +214,14 @@ int main()
 	}
 #else
     static const char *testfns[] = {
+        "rom:/DIVS.btest",
+        "rom:/DIVU.btest",
+
+        "rom:/MULS.btest",
+        "rom:/MULU.btest",
+
+        "rom:/DBcc.btest",
+
         "rom:/RTE.btest",
         "rom:/RTR.btest",
         "rom:/RTS.btest",
