@@ -199,7 +199,7 @@ ALIGN(main_loop): OP(nop):
     #if M64K_CONFIG_ADDRERR
     sw opcode, M64K_OFF_IR(m64k)
     #endif
-    add t1, opcode, m_cyc_table
+    addu t1, opcode, m_cyc_table
     lbu t1, 0(t1)
     srl t0, opcode, 12
     sll t0, 2
@@ -248,7 +248,7 @@ OP(bits):
 
 main_loop_exit:
     lw t0, pc_diff
-    add m_pc, t0
+    addu m_pc, t0
     sw m_pc, M64K_OFF_PC(m64k)
     #if !M64K_CONFIG_ADDRERR
     sw opcode, M64K_OFF_IR(m64k)
@@ -694,7 +694,7 @@ ea_101: # (d16,An)
 ea7_011: # (d8,PC,Xn)
     #if M64K_CONFIG_ADDRERR
     lw t0, pc_diff
-    add eaptr32, m_pc, t0     # Compute exact eaptr32 in case it's pushed on the stack for the exception
+    addu eaptr32, m_pc, t0    # Compute exact eaptr32 in case it's pushed on the stack for the exception
     #else
     move eaptr32, m_pc
     #endif
@@ -732,6 +732,10 @@ ea7_010: # (d16,PC)
     lh t0, 0(m_pc)
     addi m_pc, 2
     add eaptr32, t0
+    #if M64K_CONFIG_ADDRERR
+    lw t1, pc_diff
+    addu eaptr32, t1   # Compute exact eaptr32 in case it's pushed on the stack for the exception
+    #endif
     map_m68k eaptr, eaptr32
     jr ra
 ea7_100: # #<data>
@@ -1448,8 +1452,8 @@ OP(pea):
     addiu t0, -4
     check_addr_error t0, write_address_error
     map_m68k t1, t0
-    swl eaptr32, 0(t0)
-    swr eaptr32, 3(t0)
+    swl eaptr32, 0(t1)
+    swr eaptr32, 3(t1)
     sw_m64k t0, M64K_OFF_AREGS+7*4
     j main_loop
 
@@ -1523,11 +1527,9 @@ OP(unlk):
 
 OP(jmp):
     jal decode_ea
-    lw t0, pc_diff
-    addu eaptr32, t0
 jmp_exec:
     map_m68k m_pc, eaptr32             # map 32-bit target to host pointer
-    sub t0, eaptr32, m_pc              # save new pc_diff
+    subu t0, eaptr32, m_pc             # save new pc_diff
     sw t0, pc_diff
     check_addr_error eaptr32, pc_address_error
     j main_loop
