@@ -54,7 +54,7 @@ typedef struct  {
     uint32_t pc;
     uint32_t prefetch[2];
     uint32_t nrams;
-    uint32_t ram[32][2];
+    uint32_t ram[80][2];
 } test_state_t;
 
 void read_state(FILE *f, test_state_t *s)
@@ -67,7 +67,7 @@ void read_state(FILE *f, test_state_t *s)
     fread(&s->pc, 1, 4, f);
     fread(s->prefetch, 1, 8, f);
     fread(&s->nrams, 1, 4, f);
-    assertf(s->nrams <= 32, "Too many RAM entries in test: %ld", s->nrams);
+    assertf(s->nrams <= 80, "Too many RAM entries in test: %ld", s->nrams);
     for (int i=0; i<s->nrams; i++) {
         fread(s->ram[i], 1, 8, f);
     }
@@ -143,7 +143,9 @@ void run_testsuite(const char *fn)
                 debugf("D%d: %08lx != %08lx\n", i, m64k.dregs[i], final.dregs[i]);
                 failed = true;
             }
-            if (i<7 && m64k.aregs[i] != final.aregs[i])  {
+        }
+        for (int i=0; i<7; i++) {
+            if (m64k.aregs[i] != final.aregs[i])  {
                 debugf("A%d: %08lx != %08lx\n", i, m64k.aregs[i], final.aregs[i]);
                 failed = true;
             }
@@ -214,6 +216,12 @@ int main()
 	}
 #else
     static const char *testfns[] = {
+        "rom:/EXT.l.btest",
+        "rom:/EXT.w.btest",
+
+        "rom:/MOVEM.w.btest",
+        "rom:/MOVEM.l.btest",
+
         "rom:/DIVS.btest",
         "rom:/DIVU.btest",
 
@@ -239,9 +247,6 @@ int main()
         "rom:/Scc.btest",
 
         "rom:/SWAP.btest",
-
-        "rom:/EXT.l.btest",
-        "rom:/EXT.w.btest",
 
         "rom:/EORItoCCR.btest",
         "rom:/EORItoSR.btest",

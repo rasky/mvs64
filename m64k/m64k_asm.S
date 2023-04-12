@@ -38,7 +38,7 @@ optable0:
     .long   op0_1000, op0_1001, op_eori,  op0_1011, op0_1100, op0_1101, op0_1110, op0_1111
 optable4:
     .long   op_negx,  op_lea,   op_clr,   op_lea,   op_neg,   op_lea,   op_not,   op_lea
-    .long   op_pea,   op_lea,   op_tst,   op_lea,   op4_1100, op_lea,   op_tbl4e, op_lea
+    .long   op_pea,   op_lea,   op_tst,   op_lea, op_movem_mr,op_lea,   op_tbl4e, op_lea
 optable4e:
     .long   op4e_0000, op4e_0001, op4e_0010, op4e_0011, op4e_0100, op_link,   op_mvusp,  op_tbl4e7    
     .long   op_jsr,    op_jsr,    op_jsr,    op_jsr,    op_jmp,    op_jmp,    op_jmp,    op_jmp
@@ -82,9 +82,13 @@ opbitsmem:
 #define rmw_srmask    t8    // for SR RMWs, it contains the mask for SR bits to be written
 
 .macro la_m64k  reg, offset,base
-    add \reg, m64k, \base
-    .if \offset
+    .ifnb \base
+        .set noat
+        add \reg, m64k, \base
         addi \reg, \offset
+        .set at
+    .else
+        add \reg, m64k, \offset
     .endif
 .endm
 
@@ -455,6 +459,9 @@ adderr_finish:
     andi t0, opcode, 0xFFC0
     beq t0, 0x4EC0, addrerr_fixup_jmp   # Fixup for JMP
     beq t0, 0x4E80, addrerr_fixup_jsr   # Fixup for JSR
+    andi t0, opcode, 0xFF80
+    beq t0, 0x4880, addrerr_fixup_movem_rm   # Fixup for MOVEM reg->mem
+    beq t0, 0x4C80, addrerr_fixup_movem_mr   # Fixup for MOVEM mem->reg
     j main_loop_exit
 
 addrerr_fixup_addq:
@@ -584,6 +591,38 @@ addrerr_fixup_jsr:
     sw_m64k t0, M64K_OFF_AREGS+7*4
 addrerr_fixup_jmp:
     addiu m_pc, -2
+    j main_loop_exit
+
+addrerr_fixup_movem_rm:
+    # We use a shared implementation between reg->mem and mem->reg, so
+    # we always generate a read_address_error. Change to write when the
+    # opcode is reg->mem.
+    lw_m64k t0, M64K_OFF_PENDINGEXC+8
+    xori t0, FC_READ
+    sw_m64k t0, M64K_OFF_PENDINGEXC+8
+
+    andi t0, opcode, 1<<6                # check if word transfer
+    beqz t0, main_loop_exit              # if word, fixup is finished
+    andi t0, opcode, 7<<3                # check if EA mode is pre-decremented
+    bne t0, 4<<3, main_loop_exit         # otherwise, fixup is finished
+    andi t0, opcode, 7
+    sll t0, 2
+    lw_m64k t1, M64K_OFF_PENDINGEXC+4
+    addiu t1, 2
+    sw_m64k t1, M64K_OFF_PENDINGEXC+4
+    j main_loop_exit
+
+addrerr_fixup_movem_mr:
+    andi t0, opcode, 1<<6                # check if word transfer
+    beqz t0, main_loop_exit              # if word, no fixup
+    andi t0, opcode, 7<<3                # check if EA mode is post-increment
+    bne t0, 3<<3, main_loop_exit         # otherwise, no fixup
+    
+    andi t0, opcode, 7
+    sll t0, 2
+    lw_m64k t1, M64K_OFF_AREGS,t0        # Revert the post-increment
+    addiu t1, -2
+    sw_m64k t1, M64K_OFF_AREGS,t0
     j main_loop_exit
 
     .set noreorder
@@ -1447,6 +1486,110 @@ OP(movea32):
     sw_m64k t1, M64K_OFF_AREGS,t0
     j main_loop
 
+    #define movem_mask        rmw_bitsize
+    #define movem_fetch_op    rmw_op
+    #define reg_ptr           dptr
+    #define reg_incr          t3
+    #define eaptr32_diff      t2
+OP(movem_rm):
+    andi t0, opcode, 7<<3
+    beqz t0, op_ext
+
+    andi t0, opcode, 1<<6
+    beqz t0, movem_rm16
+    li opsize, 4
+    lax movem_fetch_op, movem_rm_impl_32
+    j movem_start
+movem_rm16:
+    lax movem_fetch_op, movem_rm_impl_16
+    li opsize, 2
+    j movem_start
+
+OP(movem_mr):
+    andi t0, opcode, 1<<6
+    beqz t0, movem_mr16
+    li opsize, 4
+    lax movem_fetch_op, movem_mr_impl_32
+    j movem_start
+movem_mr16:
+    lax movem_fetch_op, movem_mr_impl_16
+    li opsize, 2
+movem_start:
+    lhu movem_mask, 0(m_pc)
+    addiu m_pc, 2
+
+    jal decode_ea
+
+    la_m64k reg_ptr, M64K_OFF_DREGS-4
+    li reg_incr, 4
+    andi t0, opcode, 7<<3
+    beq t0, 3<<3, movem_postincr
+    beq t0, 4<<3, movem_predecr
+    li t1, -1
+movem_pre_loop:
+    check_addr_error eaptr32, read_address_error
+    .set noreorder
+movem_loop:
+    beqz movem_mask, movem_mr_end
+1:   andi t0, movem_mask, 1
+    srl movem_mask, 1
+    beqz t0, 1b
+     addu reg_ptr, reg_incr
+    .set reorder
+    #if M64K_CONFIG_ADDR_WRAP
+    addu eaptr32, opsize
+    jalr movem_fetch_op
+    map_m68k eaptr, eaptr32
+    j movem_loop
+    #else
+    jalr movem_fetch_op
+    addu eaptr, opsize
+    j movem_loop
+    #endif
+movem_mr_end:
+    bltz t1, main_loop
+    addu eaptr32, eaptr, eaptr32_diff
+    sw_m64k eaptr32, M64K_OFF_AREGS,t1
+    j main_loop
+
+movem_predecr:
+    addu t0, eaptr32, opsize
+    sw_m64k t0, M64K_OFF_AREGS,t1
+    subu eaptr32_diff, t0, eaptr
+    neg opsize
+    la_m64k reg_ptr, M64K_OFF_AREGS+8*4
+    li reg_incr, -4
+    j movem_pre_loop
+movem_postincr:
+    check_addr_error eaptr32, read_address_error
+    subu eaptr32_diff, eaptr32, eaptr
+    subu t0, eaptr32, opsize
+    sw_m64k t0, M64K_OFF_AREGS,t1
+    j movem_loop
+
+
+movem_mr_impl_16:
+    lh t0, 0(eaptr)
+    sw t0, 0(reg_ptr)
+    jr ra
+movem_mr_impl_32:
+    lwl t0, 0(eaptr)
+    lwr t0, 3(eaptr)
+    sw t0, 0(reg_ptr)
+    jr ra
+movem_rm_impl_16:
+    lh t0, 2(reg_ptr)
+    sh t0, 0(eaptr)
+    jr ra
+movem_rm_impl_32:
+    lw t0, 0(reg_ptr)
+    swl t0, 0(eaptr)
+    swr t0, 3(eaptr)
+    jr ra
+    #undef movem_fetch_op
+    #undef movem_mask
+
+
 OP(mvfsr):
     check_supervisor
     li opsize, 2
@@ -1565,7 +1708,7 @@ mvusp_read:
 
 OP(pea):
     andi t0, opcode, 1<<7
-    bnez t0, op_ext
+    bnez t0, op_movem_rm
     andi t0, opcode, 0b111000
     beqz t0, op_swap
     andi t0, opcode, 1<<6
