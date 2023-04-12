@@ -101,7 +101,6 @@ void m64k_run(m64k_t *m64k, int64_t until)
                 debugf("[m64k] RSTO asserted\n");
                 break;
             case M64K_PENDINGEXC_DIVBYZERO:
-                debugf("[m64k] division by zero\n");
                 m64k_exception_divbyzero(m64k);
                 break;
             default:

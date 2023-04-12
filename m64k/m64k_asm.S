@@ -125,6 +125,27 @@ opbitsmem:
     .endif
 .endm
 
+# "not32sx" macro. Like "not", but only complements the lower
+# 32-bits of the register (and then sign extends).
+.macro not32sx dst, src
+    .ifnb \src
+    subu \dst, zx64_mask, \src
+    .else
+    subu \dst, zx64_mask, \dst
+    .endif
+.endm
+
+# "not32" macro. Like "not", but only complements the lower
+# 32-bits of the register (and keep the upper half unchanged).
+.macro not32 dst, src
+    .ifnb \src
+    xor \dst, zx64_mask, \src
+    .else
+    xor \dst, zx64_mask, \dst
+    .endif
+.endm
+
+
 # "jal_and_j" macro. Compact version of "jal" followed by "j", with a tail-call
 # for optimal icache usage.
 .macro jal_and_j func, label
@@ -571,7 +592,7 @@ addrerr_fixup_jmp:
 ###############################################################
 # Privilege violation error handling
 ###############################################################
-
+#if M64K_CONFIG_PRIVERR
 check_supervisor:
     .set reorder
     .set noat
@@ -585,7 +606,35 @@ check_supervisor:
 1:  jr ra
     .set at
     .set noreorder
+#endif
 
+###############################################################
+# Division by zero exception
+###############################################################
+#if M64K_CONFIG_DIVBYZERO
+    .section .sdata
+exc_dbz_pcoff: .byte -2,-2,-2,-2,-2,-4,-4,-2
+               .byte -4,-6,-2,-2,-2,-2,-2,-2
+    .text
+
+exception_divbyzero:
+    .set reorder
+    li t0, M64K_PENDINGEXC_DIVBYZERO   # set pending exception code to DIVBYZERO
+    sw_m64k t0, M64K_OFF_PENDINGEXC
+
+    srl t0, opcode, 3                  # extract EA mode
+    andi t0, 7
+    bne t0, 7, dbz_fetch_pcoff
+    andi t0, opcode, 7                 # if EA mode is 7, use register as submode
+    add t0, 8
+dbz_fetch_pcoff:
+    lb t0, exc_dbz_pcoff(t0)           # get PC offset correction
+    addu m_pc, t0                      # apply it
+    li flag_nv, 0                      # undefined in the manual, set N=V=0
+    li flag_zc, 1                      # undefined in the manual, set Z=C=0
+    j main_loop_exit
+    .set noreorder
+#endif
 
 ###############################################################
 # Immediate computation
@@ -1050,7 +1099,9 @@ OP(div):
 op_divu_exec:
     lw t0, 0(dptr)
     lhu t1, 0(eaptr)
-    beqz t1, op_div_byzero
+    #if M64K_CONFIG_DIVBYZERO
+    beqz t1, exception_divbyzero
+    #endif
     divu zero, t0, t1
     mflo t0
     and t2, t0, 0xFFFF
@@ -1058,7 +1109,9 @@ op_divu_exec:
 op_divs_exec:
     lw t0, 0(dptr)
     lh t1, 0(eaptr)
-    beqz t1, op_div_byzero
+    #if M64K_CONFIG_DIVBYZERO
+    beqz t1, exception_divbyzero
+    #endif
     div zero, t0, t1
     mflo t0
     sll t2, t0, 16
@@ -1072,16 +1125,10 @@ op_div_finish:
     sh t0, 2(dptr)
     j main_loop
 op_div_overflow:
-    dli t0, 1<<63
-    sll flag_nv, 0
-    xor flag_nv, t0
+    not32sx flag_nv
+    not32 flag_nv
     zx64 flag_zc
     j main_loop
-op_div_byzero:
-    li t0, M64K_PENDINGEXC_DIVBYZERO
-    sw_m64k t0, M64K_OFF_PENDINGEXC
-    j main_loop_exit
-
 
 OP(group_logical):
     li opsize, 0

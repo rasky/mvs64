@@ -10,5 +10,8 @@
 // Set to 1 to emulate privilege violations
 #define M64K_CONFIG_PRIVERR        1
 
+// Set to 1 to emulate division by zero
+#define M64K_CONFIG_DIVBYZERO      1
+
 
 #endif // M64K_CONFIG_H
