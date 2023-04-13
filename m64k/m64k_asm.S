@@ -61,6 +61,7 @@ opbitsmem:
 #define m64k        a0
 #define m_cycles    a1    // cycles to execute (NOTE: must be kept caller-saved register)
 #define mmap_mask   a2
+#define _________   a3    // warning: used by move.m, check there before using it
 
 #define lax_base    v0
 #define zx64_mask   v1
@@ -1487,84 +1488,134 @@ OP(movea32):
     j main_loop
 
     #define movem_mask        rmw_bitsize
-    #define movem_fetch_op    rmw_op
+    #define movem_op          rmw_op
+    #define ea_reg            t1            // set by decode_ea
     #define reg_ptr           dptr
     #define reg_incr          t3
     #define eaptr32_diff      t2
-OP(movem_rm):
+    #define ctz_lut           result
+    #define reg_incr_3x       a3
+
+    #define MOVEM_4BIT        1
+
+OP(movem_rm):  # reg -> mem
     andi t0, opcode, 7<<3
     beqz t0, op_ext
-
-    andi t0, opcode, 1<<6
-    beqz t0, movem_rm16
-    li opsize, 4
-    lax movem_fetch_op, movem_rm_impl_32
+    andi t0, opcode, 1<<6                   # check if word/long
+    beqz t0, movem_rm16                     # jump to 16 bit variant setup
+    li opsize, 4                            # 32-bit variant: opsize is 4
+    lax movem_op, movem_rm_impl_32          # 32-bit variant: implementation function
     j movem_start
 movem_rm16:
-    lax movem_fetch_op, movem_rm_impl_16
-    li opsize, 2
+    li opsize, 2                            # 16-bit variant: opsize is 2
+    lax movem_op, movem_rm_impl_16          # 16-bit variant: implementation function
     j movem_start
 
-OP(movem_mr):
-    andi t0, opcode, 1<<6
-    beqz t0, movem_mr16
+OP(movem_mr): # mem -> reg
+    andi t0, opcode, 1<<6                   # check if word/long
+    beqz t0, movem_mr16                     # jump to 16 bit variant setup
     li opsize, 4
-    lax movem_fetch_op, movem_mr_impl_32
+    lax movem_op, movem_mr_impl_32
     j movem_start
 movem_mr16:
-    lax movem_fetch_op, movem_mr_impl_16
     li opsize, 2
-movem_start:
-    lhu movem_mask, 0(m_pc)
+    lax movem_op, movem_mr_impl_16
+
+movem_start:  # Generic implementation (16/32-bit, mem->reg/reg->mem)
+    lhu movem_mask, 0(m_pc)                 # fetch register mask
     addiu m_pc, 2
-
-    jal decode_ea
-
-    la_m64k reg_ptr, M64K_OFF_DREGS-4
-    li reg_incr, 4
-    andi t0, opcode, 7<<3
-    beq t0, 3<<3, movem_postincr
-    beq t0, 4<<3, movem_predecr
-    li t1, -1
+    jal decode_ea                           # decode EA
+    #if MOVEM_4BIT
+    li ctz_lut, 0x67646764
+    #endif
+    la_m64k reg_ptr, M64K_OFF_DREGS-4       # Initialize pointer to register array (one slot before)
+    li reg_incr, 4                          # Initialize register pointer increment (4 bytes)
+    li reg_incr_3x, 12                      # Initialize 3x register pointer increment (12 bytes)
+    andi t0, opcode, 7<<3                   # check if EA is predecrement or postincrement
+    beq t0, 3<<3, movem_postincr            # jump to setup the postincrement variant
+    beq t0, 4<<3, movem_predecr             # jump to setup the predecrement variant
+    li ea_reg, -1                           # Otherwise (standard EA), no register writeback is needed
 movem_pre_loop:
     check_addr_error eaptr32, read_address_error
-    .set noreorder
+
+#if MOVEM_4BIT
+    # Main loop: 4-bit version. Uses a 4-bit based CTZ primitive
+    # to process four bits at a time. This is slightly faster
+    # than the 1-bit version (and much faster in worst cases).
 movem_loop:
-    beqz movem_mask, movem_mr_end
-1:   andi t0, movem_mask, 1
-    srl movem_mask, 1
-    beqz t0, 1b
+    .set noreorder
+    andi t0, movem_mask, 1
+    bnez t0, 1f
      addu reg_ptr, reg_incr
-    .set reorder
+    srlv t0, ctz_lut, movem_mask
+    andi t0, 3
+    bnez t0, 2f
+     srlv movem_mask, movem_mask, t0
+    beqz movem_mask, movem_mr_end
+     srl movem_mask, 4
+    j movem_loop
+     addu reg_ptr, reg_incr_3x
+2:  bgez reg_incr, 3f
+     sll t0, 2
+    neg t0, t0
+3:  addu reg_ptr, t0
+1:  srl movem_mask, 1
     #if M64K_CONFIG_ADDR_WRAP
-    addu eaptr32, opsize
-    jalr movem_fetch_op
+    jalr movem_op
+     addu eaptr32, opsize
+    .set reorder
     map_m68k eaptr, eaptr32
     j movem_loop
     #else
-    jalr movem_fetch_op
+    .set reorder
+    jalr movem_op
     addu eaptr, opsize
     j movem_loop
     #endif
+#else
+    # Main loop: 1-bit version. This is slightly slower than the
+    # 4-bit version, but it is more compact and easier to understand.
+movem_loop:                              # Main movem loop
+    .set noreorder
+    beqz movem_mask, movem_mr_end        # If the mask is empty, we are done
+1:   andi t0, movem_mask, 1              # Check if bit 0 of the mask is set
+    srl movem_mask, 1                    # Shift the mask
+    beqz t0, 1b                          # If not, loop again
+     addu reg_ptr, reg_incr              # Increment register pointer for each bit
+    #if M64K_CONFIG_ADDR_WRAP
+    jalr movem_op                        # Do one reg/mem transfer
+     addu eaptr32, opsize                # Increment memory pointer (full 32-bit value
+    .set reorder
+    map_m68k eaptr, eaptr32              # Map the 32-bit memory pointer to the N64 address space
+    j movem_loop                         # Loop again
+    #else
+    .set reorder
+    jalr movem_op                        # Do one reg/mem transfer
+    addu eaptr, opsize                   # Increment memory pointer
+    j movem_loop                         # Loop again
+    #endif
+#endif
+
 movem_mr_end:
-    bltz t1, main_loop
-    addu eaptr32, eaptr, eaptr32_diff
-    sw_m64k eaptr32, M64K_OFF_AREGS,t1
+    bltz ea_reg, main_loop                   # If no register writeback is needed, we are done
+    addu eaptr32, eaptr, eaptr32_diff        # Calculate the new 32-bit address given the current pointer
+    sw_m64k eaptr32, M64K_OFF_AREGS,ea_reg   # Write back the new address to the address register
     j main_loop
 
-movem_predecr:
-    addu t0, eaptr32, opsize
-    sw_m64k t0, M64K_OFF_AREGS,t1
-    subu eaptr32_diff, t0, eaptr
-    neg opsize
-    la_m64k reg_ptr, M64K_OFF_AREGS+8*4
-    li reg_incr, -4
+movem_predecr:                               # Predecrement variant
+    addu t0, eaptr32, opsize                 # Revert the predecrement in the address register
+    sw_m64k t0, M64K_OFF_AREGS,t1            #  (beheavior specific of M68000)
+    subu eaptr32_diff, t0, eaptr             # Calculate the difference between the 32-bit address and the pointer
+    neg opsize                               # Negate opsize, so that we can use it to decrement the memory location
+    la_m64k reg_ptr, M64K_OFF_AREGS+8*4      # Initialize pointer to register array (one slot after)
+    neg reg_incr                             # Negate register pointer increment (-4 bytes)
+    neg reg_incr_3x                          # Negate 3x register pointer increment (-12 bytes)
     j movem_pre_loop
-movem_postincr:
-    check_addr_error eaptr32, read_address_error
-    subu eaptr32_diff, eaptr32, eaptr
-    subu t0, eaptr32, opsize
-    sw_m64k t0, M64K_OFF_AREGS,t1
+movem_postincr:                              # Postincrement variant
+    check_addr_error eaptr32, read_address_error  # Check if the post-incremented address is valid
+    subu eaptr32_diff, eaptr32, eaptr        # Calculate the difference between the 32-bit address and the pointer
+    subu t0, eaptr32, opsize                 # Rever the post-increment in the address register
+    sw_m64k t0, M64K_OFF_AREGS,t1            #  (beheavior specific of M68000)
     j movem_loop
 
 
@@ -1586,8 +1637,15 @@ movem_rm_impl_32:
     swl t0, 0(eaptr)
     swr t0, 3(eaptr)
     jr ra
-    #undef movem_fetch_op
+
     #undef movem_mask
+    #undef movem_op
+    #undef ea_reg        
+    #undef reg_ptr       
+    #undef reg_incr      
+    #undef eaptr32_diff  
+    #undef ctz_lut
+    #undef reg_incr_3x
 
 
 OP(mvfsr):
