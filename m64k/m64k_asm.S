@@ -32,10 +32,10 @@ pc_diff:      .long 0
 
 optable:
     .long   op_tbl0,  op_moveb, op_movel, op_movew, op_tbl4,  op_addq,  op_bcc,   op_moveq
-    .long   op_or,    op_sub,   op0_1010, op_eor,   op_and,   op_add,   op_bits,  op0_1111
+    .long   op_or,    op_sub,   op0_1010, op_cmp,   op_and,   op_add,   op_bits,  op0_1111
 optable0:
     .long   op_ori,   op0_0001, op_andi,  op0_0011, op_subi,  op0_0101, op_addi,  op0_0111
-    .long   op0_1000, op0_1001, op_eori,  op0_1011, op0_1100, op0_1101, op0_1110, op0_1111
+    .long   op0_1000, op0_1001, op_eori,  op0_1011, op_cmpi,  op0_1101, op0_1110, op0_1111
 optable4:
     .long   op_negx,  op_lea,   op_clr,   op_lea,   op_neg,   op_lea,   op_not,   op_lea
     .long   op_pea,   op_lea,   op_tst,   op_lea, op_movem_mr,op_lea,   op_tbl4e, op_lea
@@ -156,6 +156,11 @@ opbitsmem:
 .macro jal_and_j func, label
     lax ra, \label
     j \func
+.endm
+
+.macro jalr_and_j reg, label
+    lax ra, \label
+    jr \reg
 .endm
 
 .macro map_m68k dst, src
@@ -415,8 +420,10 @@ address_error:
     sw_m64k t0, M64K_OFF_PENDINGEXC+0
     sw_m64k eaptr32, M64K_OFF_PENDINGEXC+4
 
-    # Check if it's a MOVE. MOVE has 2 EAs and we need to understand whether
-    # the read part or the write part is responsible for the address error.
+    # Most opcodes that generate an address error have a standard EA
+    # encoding in bits 0..6, and we handle those just below. Some of them,
+    # though, don't have a standard EA, so we need to handle with separate
+    # code.
     lw_m64k t1, M64K_OFF_IR       # Check original opcode
     andi t0, t1, 0xF000
     beq t0, 0x1000, addrerr_fixup_move # Fixup for MOVE (src/dst EA)
@@ -428,8 +435,10 @@ address_error:
     beq t1, 0x4e73, addrerr_fixup_rte  # Fixup for RTE (which doesn't have EA)
     beq t1, 0x4e75, addrerr_fixup_rts  # Fixup for RTS (which doesn't have EA)
     beq t1, 0x4e77, addrerr_fixup_rtr  # Fixup for RTR (which doesn't have EA)
+    andi t0, t1, 0xF138
+    beq t0, 0xB108, address_fixup_cmpm # Fixup for CMPM (two registers post-increment)
 
-addrerr_fixup_ea:
+addrerr_fixup_standard_ea:
     # Compute PC offset from the opcode. Notice that we used the
     # "current" opcode that might have been modified by the handler to force
     # a specific EA mode; but this is exactly the one that we should be parsing here.
@@ -443,7 +452,7 @@ adderr_off7:
 addrerr_adjust_pc:
     lb t0, addrerr_pcoff(t0)             # PC offset
     add m_pc, t0                         # Rollback PC
-adderr_finish:
+addrerr_finish:
     lw_m64k opcode, M64K_OFF_IR          # Restore original opcode
     andi t0, opcode, 0xFFE0
     or t0, t2                            # Merge FC code (with read/write flag)
@@ -502,7 +511,7 @@ addrerr_fixup_addq:
 
 addrerr_fixup_move:
     andi t0, t2, 1<<4                  # Check if it's a read
-    bnez t0, addrerr_fixup_ea          # If it's a read, do the standard EA fixup
+    bnez t0, addrerr_fixup_standard_ea # If it's a read, do the standard EA fixup
 
     # This is a write exception. We must do fixup based *mainly* on the
     # destination EA, but there are some cases in which the source EA also
@@ -584,7 +593,7 @@ addrerr_fixup_rte:
 addrerr_fixup_rts:
 addrerr_fixup_rtr:
     addi m_pc, -4                            # adjust current PC
-    j adderr_finish
+    j addrerr_finish
 
 addrerr_fixup_jsr:
     lw_m64k t0, M64K_OFF_AREGS+7*4     # revert SP-=4 performed by JSR
@@ -625,6 +634,10 @@ addrerr_fixup_movem_mr:
     addiu t1, -2
     sw_m64k t1, M64K_OFF_AREGS,t0
     j main_loop_exit
+
+address_fixup_cmpm:
+    addiu m_pc, -2
+    j addrerr_finish
 
     .set noreorder
 #endif
@@ -981,6 +994,9 @@ OP(addi):
 op_subi:  # (same cacheline)
     lax rmw_op, op_sub_rmwimpl
     jal_and_j decode_imm, rmw_eadst
+op_cmpi:
+    lax rmw_op, op_cmp_rmwimpl
+    jal_and_j decode_imm, rmw_eadst
 
 OP(add):
     lax rmw_op, op_add_rmwimpl
@@ -1003,7 +1019,6 @@ op_add_rmwimpl_flags:
     jr ra
 
 OP(sub):
-    # check if the opcode is addx instead
     lax rmw_op, op_sub_rmwimpl
     jal decode_dptr
     andi t0, opcode, 0xC0
@@ -1106,6 +1121,63 @@ op_adda32_rmwimpl:
     jr ra
 1:  dsubu result, t1, t0
     jr ra
+
+OP(cmp):
+    // CMP: 000, 001, 010
+    // CMPA: 011, 111
+    // EOR: 100, 101, 110
+    andi t0, opcode, 0b111 << 6
+    beq t0, 0b011 << 6, op_cmpa16
+    beq t0, 0b111 << 6, op_cmpa32
+    bge t0, 0b100 << 6, op_eor
+    lax rmw_op, op_cmp_rmwimpl
+    jal decode_dptr
+    li opsize, 0              # opsize not calculated yet
+    j rmw    
+op_cmp_rmwimpl:
+    dsubu result, t1, t0
+    dsll flag_zc, result, rmw_bitsize 
+    sllv t0, t0, rmw_bitsize 
+    sllv t1, t1, rmw_bitsize 
+    dsubu flag_nv, t1, t0
+    j main_loop               # skip rmw writeback
+
+OP(cmpa16):
+    li opsize, 2
+    jal decode_ea
+    lax rmw_op, op_cmpa16_rmwimpl
+    j op_cmpa_start
+op_cmpa32:
+    li opsize, 4
+    jal decode_ea
+    lax rmw_op, op_cmp_rmwimpl
+op_cmpa_start:
+    jal decode_dptr
+    addi dptr, 8*4
+    j rmw32_easrc
+op_cmpa16_rmwimpl:
+    lh t0, 0(eaptr)
+    zx64 t0
+    j op_cmp_rmwimpl
+
+OP(cmpm):
+    li opsize, 0                      # opsize not calculated yet
+    andi t1, opcode, 7                # extract Ay*4 (needed for EA calculation)
+    sll t1, 2
+    jal ea_011                        # calculate EA as post-increment
+    sub dptr, eaptr, 4                # set dptr to decoded address, adjusting for size
+    add dptr, opsize                  #  (rmw treats dptr accesses differently from eaptr)
+    #if M64K_CONFIG_ADDRERR
+    andi t0, opcode, 3<<6             # if the size is not byte, check for address error
+    beqz t0, 1f                       #  (we do this because rmw will not check address errors in dptr)
+    check_addr_error eaptr32, read_address_error
+    #endif
+1:  srl t1, opcode, 7                 # extract Ax*4
+    andi t1, 7<<2
+    jal ea_011                        # calculate EA as post-increment
+    lax rmw_op, op_cmp_rmwimpl        
+    j rmw_no_ea                       # do rmw
+
 
 OP(mul):
     li opsize, 2
@@ -1216,6 +1288,8 @@ OP(eori):
     lax rmw_op, op_eor_rmwimpl
     jal_and_j decode_imm, rmw_eadst
 OP(eor):
+    andi t0, opcode, 0b111000
+    beq t0, 0b001000, op_cmpm
     lax rmw_op, op_eor_rmwimpl
     j op_group_logical
 op_eor_rmwimpl:
@@ -1496,7 +1570,7 @@ OP(movea32):
     #define ctz_lut           result
     #define reg_incr_3x       a3
 
-    #define MOVEM_4BIT        1
+    #define MOVEM_4BIT        1            // Faster 4-bit-at-a-time movem
 
 OP(movem_rm):  # reg -> mem
     andi t0, opcode, 7<<3
