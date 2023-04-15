@@ -32,26 +32,26 @@ pc_diff:      .long 0
 
 optable:
     .long   op_tbl0,  op_moveb, op_movel, op_movew, op_tbl4,  op_addq,  op_bcc,   op_moveq
-    .long   op_or,    op_sub,   op0_1010, op_cmp,   op_and,   op_add,   op_bits,  op0_1111
+    .long   op_or,    op_sub,   op_unk,   op_cmp,   op_and,   op_add,   op_shifts,op_unk
 optable0:
     .long   op_ori,   op_bitsr, op_andi,  op_bitsr, op_subi,  op_bitsr, op_addi,  op_bitsr
-    .long   op_bitsi, op_bitsr, op_eori,  op_bitsr, op_cmpi,  op_bitsr, op0_1110, op_bitsr
+    .long   op_bitsi, op_bitsr, op_eori,  op_bitsr, op_cmpi,  op_bitsr, op_unk,   op_bitsr
 optable4:
     .long   op_negx,  op_lea,   op_clr,   op_lea,   op_neg,   op_lea,   op_not,   op_lea
     .long   op_pea,   op_lea,   op_tst,   op_lea, op_movem_mr,op_lea,   op_tbl4e, op_lea
 optable4e:
-    .long   op4e_0000, op4e_0001, op4e_0010, op4e_0011, op4e_0100, op_link,   op_mvusp,  op_tbl4e7    
+    .long   op_unk,    op_unk,    op_unk,    op_unk,    op_trap,   op_link,   op_mvusp,  op_tbl4e7    
     .long   op_jsr,    op_jsr,    op_jsr,    op_jsr,    op_jmp,    op_jmp,    op_jmp,    op_jmp
 optable4e7:
     .long   op_reset,  op_nop,    op_stop,   op_rte,    op_rtd,    op_rts,    op_trapv,  op_rtr
-    .long   op_unk,    op_unk,    op_unk,    op_unk,    op_unk,    op_unk,    op_unk,    op_unk
+    .long   op_unk,    op_unk,    op_movec,  op_movec,  op_unk,    op_unk,    op_unk,    op_unk
 
-opbits:
-    .long   op_asli,  op_lsli,  opb_010,  opb_011
-    .long   op_asl,   op_lsl,   opb_110,  opb_111
-opbitsmem:
-    .long   op_aslm,  op_asrm,  op_lslm,  op_lsrm,  opm_0100, opm_0101, opm_0110, opm_0101
-    .long   opm_1000, opm_1001, opm_1010, opm_1011, opm_1100, opm_1101, opm_1110, opm_1111
+opshifts:
+    .long   op_asli,  op_lsli,  op_roxli,  op_roli
+    .long   op_asl,   op_lsl,   op_roxl,   op_rol
+opshiftsmem:
+    .long   op_aslm,  op_asrm,  op_lslm,  op_lsrm,  op_roxlm, op_roxrm, op_rolm,  op_rorm
+    .long   op_bftst, op_bfextu,op_bfchg, op_bfexts,op_bfclr, op_bfffo, op_bfset, op_bfins
 
     .text
 
@@ -262,17 +262,17 @@ op_tbl4e7:
     lw t0, optable4e7(t0)
     jr t0
     nop
-OP(bits):
+OP(shifts):
     andi t0, opcode, 0x3<<6
     beq t0, 0x3<<6, 1f
     srl t0, opcode, 1
     andi t0, 0x7<<2
-    lw t0, opbits(t0)
+    lw t0, opshifts(t0)
     jr t0
     li opsize, 0
 1:  srl t0, opcode, 6
     andi t0, 0xF<<2
-    lw t0, opbitsmem(t0)
+    lw t0, opshiftsmem(t0)
     jr t0
     li opsize, 2
 
@@ -1331,6 +1331,11 @@ op_negx_rmwimpl:
     j op_subx_rmwimpl
 
 
+OP(roli): OP(rori):
+    andi opcode, 0xFFFF^(7<<3)   # turn off ir so that EA is Dn
+    lax t1, op_rol_rmwimpl
+    lax t2, op_ror_rmwimpl
+    j op_shift_imm
 OP(lsli): OP(lsri):
     xori opcode, 1<<3
     lax t1, op_lsl_rmwimpl
@@ -1349,15 +1354,38 @@ asli_start:
     addi t2, -1          # if value is 0, it means 8
     andi t2, 7
     addi t2, 1
-    j rmw_eadst          # call RMW (note opsize=0 in OP(bits)
+    j rmw_eadst          # call RMW (note opsize=0 in OP(shifts)
 
 OP(lsl): OP(lsr):
     andi t0, opcode, 1<<8
     andi opcode, 0xFFFF^(1<<5)^(1<<3)   # turn off ir so that EA is Dn
     lax rmw_op, op_lsl_rmwimpl
-    bnez t0, asl_start
+    bnez t0, group_shifts
     lax rmw_op, op_lsr_rmwimpl
-    j asl_start
+    j group_shifts
+OP(asl): OP(asr):
+    andi t0, opcode, 1<<8
+    andi opcode, 0xFFFF^(1<<5)   # turn off ir so that EA is Dn
+    lax rmw_op, op_asl_rmwimpl
+    bnez t0, group_shifts
+    lax rmw_op, op_asr_rmwimpl
+    j group_shifts
+OP(rol): OP(ror):
+    andi t0, opcode, 1<<8
+    andi opcode, 0xFFFF^(7<<3)   # turn off ir so that EA is Dn
+    lax rmw_op, op_rol_rmwimpl
+    bnez t0, group_shifts
+    lax rmw_op, op_ror_rmwimpl
+    j group_shifts
+
+group_shifts:
+    srl t0, opcode, 7
+    andi t0, 0x7<<2
+    lw_m64k t2, M64K_OFF_DREGS,t0
+    andi t2, 63
+    j rmw_eadst                  # call RMW (note opsize=0 in OP(shifts))
+
+
 OP(lsl_rmwimpl):
     dsllv result, t1, t2                # calculate extended result
     dsllv flag_zc, result, rmw_bitsize  # affect Z and C flags
@@ -1375,21 +1403,6 @@ OP(lsr_rmwimpl):
     beqz t2, 1f                         # affect X flag only if shift amount is 0
     dsrl flag_x, flag_zc, 32
 1:  jr ra
-
-
-OP(asl): OP(asr):
-    andi t0, opcode, 1<<8
-    andi opcode, 0xFFFF^(1<<5)   # turn off ir so that EA is Dn
-    lax rmw_op, op_asl_rmwimpl
-    bnez t0, asl_start
-    lax rmw_op, op_asr_rmwimpl
-asl_start:
-    srl t0, opcode, 7
-    andi t0, 0x7<<2
-    lw_m64k t2, M64K_OFF_DREGS,t0
-    andi t2, 63
-    j rmw_eadst                  # call RMW (note opsize=0 in OP(bits)
-
 OP(asl_rmwimpl):    
     dsllv result, t1, t2                # calculate extended result
     dsllv flag_zc, result, rmw_bitsize  # affect Z and C flags
@@ -1402,7 +1415,6 @@ OP(asl_rmwimpl):
     beqz t2, 1f                         # affect X flag only if shift amount is 0
     dsrl flag_x, flag_zc, 32
 1:  jr ra
-
 OP(asr_rmwimpl):
     sllv flag_nv, t1, rmw_bitsize       # set N flag to sign of input, reset V flag
     dsll result, flag_nv, 32            # align input to the upper bits
@@ -1415,6 +1427,34 @@ OP(asr_rmwimpl):
     beqz t2, 1f                         # affect X flag only if shift amount is 0
     dsrl flag_x, flag_zc, 32
 1:  jr ra
+OP(rol_rmwimpl):
+    sll t3, opsize, 3                   # calculate bitsize in bits (8, 16, 32)
+    addi t0, t3, -1                     # calculate bytessize mask (7, 15, 31)
+    neg result, t2
+    and result, t0                      # res = shift right amount (range 0..N-1)
+    sub t0, t3, result                  # t0 = shift left amount (range 1..N)
+    dsllv t0, t1, t0                    # shift left
+    dsrlv t1, t1, result                # shift right
+    or result, t0, t1                   # combine
+    dsllv flag_zc, result, rmw_bitsize  # affect Z and C flags
+    sllv flag_nv, result, rmw_bitsize   # affect N flag and reset V flag
+    bnez t2, 1f                         # clear C flag if shift amount is 0
+    zx64 flag_zc
+1:  jr ra
+OP(ror_rmwimpl):
+    sll t3, opsize, 3                   # calculate bitsize in bits (8, 16, 32)
+    addi result, t3, -1                 # calculate bytessize mask (7, 15, 31)
+    and t0, t2, result
+    sub result, t3, t0                  # t0 = shift right amount (range 1..N)
+    dsrlv t0, t1, t0                    # shift right
+    dsllv t1, t1, result                # shift left
+    or result, t0, t1                   # combine
+    sllv flag_nv, result, rmw_bitsize   # affect N flag and reset V flag
+    move flag_zc, flag_nv               # affect Z and C flags
+    bnez t2, 1f                         # clear C flag if shift amount is 0
+    zx64 flag_zc
+1:  jr ra
+
 
 
 OP(aslm): OP(asrm):
@@ -1457,6 +1497,29 @@ op_lsl_ea_finish:
     zx64 flag_zc, flag_nv
     dsll t0, flag_x, 32
     or flag_zc, t0
+    j main_loop
+
+OP(rolm): OP(rorm):
+    jal decode_ea                       # decode EA (note opsize=2 in OP(bits))
+    check_addr_error eaptr32, read_address_error
+    andi t1, opcode, 0x100
+    lhu t0, 0(eaptr)
+    bnez t1, op_rol_ea_left
+op_rol_ea_right:
+    srl result, t0, 1
+    sll t0, 15
+    or result, t0
+    sll flag_nv, result, 16
+    move flag_zc, flag_nv
+    sh result, 0(eaptr)
+    j main_loop
+op_rol_ea_left:
+    sll result, t0, 1
+    srl t0, 15
+    or result, t0
+    sll flag_nv, result, 16
+    dsll flag_zc, result, 16
+    sh result, 0(eaptr)
     j main_loop
 
 OP(clr):
@@ -2149,25 +2212,17 @@ op_exg_start:
     j main_loop
 
 
-                                        op0_0100: op0_0101: op0_0110: op0_0111:
-op0_1000: op0_1001: op0_1010: op0_1011:           op0_1101: op0_1110: op0_1111:
-
-op0_0000: op0_0001:           op0_0011: op0_0100: op0_0101: op0_0110: op0_0111:
-op0_1000: op0_1001: op0_1010: op0_1011: op0_1100: op0_1101: op0_1110: op0_1111:
-
-op4_0000: op4_0001: op4_0010: op4_0011: op4_0100: op4_0101: op4_0110: op4_0111:
-op4_1000: op4_1001: op4_1010: op4_1011: op4_1100: op4_1101: op4_1110: op4_1111:
-
-opb_010:  opb_011:
-opb_110:  opb_111:
-
-                                        opm_0100: opm_0101: opm_0110: opm_0101:
-opm_1000: opm_1001: opm_1010: opm_1011: opm_1100: opm_1101: opm_1110: opm_1111:
-
-op4e_0000: op4e_0001: op4e_0010: op4e_0011: op4e_0100:                       op4e_0111:
-op4e_1000: op4e_1001: op4e_1010: op4e_1011: op4e_1100: op4e_1101: op4e_1110: op4e_1111:
-op_nbcd: op_trapv: op_stop: op_rtd: op_trapv:
 op_unk:
+# 68000+ instructions
+op_nbcd: op_trapv: op_stop: op_trap:
+op_roxl: op_roxm: op_roxli: op_roxlm: op_roxrm:
+# 68010+ instructions
+op_movec: op_bkpt: op_mvfccr: op_moves: op_rtd:
+# 68020+ instructions
+op_bftst: op_bfextu: op_bfchg: op_bfexts: op_bfclr: op_bfffo: op_bfset: op_bfins:
+op_callm: op_cas: op_cas2: op_chk2: op_cmp2: op_cpbcc: op_cpdbcc: op_cpgen:
+op_cprestore: op_cpsave: op_cpscc: op_cptrapcc: op_divul: op_divsl: op_extb:
+op_pack: op_rtm: op_trapcc: op_unpk:
     move a0, opcode
     jal __m64k_assert_invalid_opcode
     addiu a1, m_pc, -2
