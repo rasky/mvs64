@@ -34,8 +34,8 @@ optable:
     .long   op_tbl0,  op_moveb, op_movel, op_movew, op_tbl4,  op_addq,  op_bcc,   op_moveq
     .long   op_or,    op_sub,   op0_1010, op_cmp,   op_and,   op_add,   op_bits,  op0_1111
 optable0:
-    .long   op_ori,   op0_0001, op_andi,  op0_0011, op_subi,  op0_0101, op_addi,  op0_0111
-    .long   op0_1000, op0_1001, op_eori,  op0_1011, op_cmpi,  op0_1101, op0_1110, op0_1111
+    .long   op_ori,   op_bitsr, op_andi,  op_bitsr, op_subi,  op_bitsr, op_addi,  op_bitsr
+    .long   op_bitsi, op_bitsr, op_eori,  op_bitsr, op_cmpi,  op_bitsr, op0_1110, op_bitsr
 optable4:
     .long   op_negx,  op_lea,   op_clr,   op_lea,   op_neg,   op_lea,   op_not,   op_lea
     .long   op_pea,   op_lea,   op_tst,   op_lea, op_movem_mr,op_lea,   op_tbl4e, op_lea
@@ -1244,10 +1244,7 @@ op_div_overflow:
 
 OP(group_logical):
     li opsize, 0
-    srl dptr, opcode, 7       # get data register pointer
-    andi dptr, 0x7 << 2
-    la_m64k dptr, M64K_OFF_DREGS,dptr
-    j rmw
+    jal_and_j decode_dptr, rmw
 
 OP(andi):
     andi t0, opcode, 0b111111
@@ -1261,8 +1258,12 @@ OP(ori):
     jal_and_j decode_imm, rmw_eadst
 
 OP(and):
-    andi t0, opcode, 3<<6
-    beq t0, 3<<6, op_mul
+    li t1, 3<<6
+    and t0, opcode, t1
+    beq t0, t1, op_mul
+    li t1, 4<<6
+    and t0, opcode, t1
+    beq t0, t1, op_exg
     lax rmw_op, op_and_rmwimpl
     j op_group_logical
 op_and_rmwimpl:
@@ -2090,6 +2091,62 @@ rte_exec:
     lwl eaptr32, 2(eaptr)               # read PC from stack
     lwr eaptr32, 5(eaptr)
     jal_and_j reload_sr, jmp_exec       # reload flags/A7 using SR, and then jump to new PC
+
+    #define bitidx_mask     result
+OP(bitsr):  # bit operation using a register as index
+    jal_and_j decode_dptr, op_bits_start
+op_bitsi:   # bit operation using immediate value as index
+    addi dptr, m_pc, -2
+    addiu m_pc, 2
+op_bits_start:
+    lax rmw_op, bits_impl
+    andi t0, opcode, 0b111000    # check if EA mode is Dn
+    beqz t0, op_bits_dreg
+op_bits_ea:
+    li bitidx_mask, 7            # standard EA: 8-bit operation
+    li opsize, 1
+    jal_and_j decode_ea, rmw8_eadst
+op_bits_dreg:
+    li bitidx_mask, 31           # EA is Dn: 32-bit operation
+    li opsize, 4
+    jal_and_j decode_ea, rmw32_eadst
+bits_impl:  # First part is common to all bit operations
+    lax rmw_op, bittable         # load bittable pointer
+    srl t2, opcode, 3            # extract bitop from opcode, multiplied by 8
+    andi t2, 3<<3                # (0=btst, 8=bchg, 16=bclr, 24=bset)
+    add rmw_op, t2               # calculate bitop pointer
+    dsll t2, zx64_mask, 32       # t2 = ffffffff00000000
+    and flag_zc, t2              # isolate C flag
+    and t0, bitidx_mask          # mask bit index (either 0..7 o 0..31)
+    li t2, 1                        
+    sllv t2, t2, t0              # t2 = 1 << bitindex
+    and t3, t2, t1               # t3 = value & (1 << bitindex)
+    or flag_zc, t3               # set Z flag with current bit value
+    jr rmw_op                    # jump to bitop function
+bittable:
+    nop                          # btst: no writeback necessary
+    j main_loop            
+    xor result, t1, t2           # bchg: result = value ^ (1 << bitindex)
+    jr ra
+    xor result, t1, t3           # bclr: result = value ^ (value & (1 << bitindex))
+    jr ra
+    or result, t1, t2            # bset: result = value | (1 << bitindex)
+    jr ra
+    #undef bitmask
+
+OP(exg):
+    jal decode_dptr
+    li opsize, 4
+    jal decode_ea
+    andi t2, opcode, 0b11111000
+    bne t2, 0b01001000, op_exg_start
+    addi dptr, 8*4
+op_exg_start:
+    lw t2, (dptr)
+    lw t3, (eaptr)
+    sw t2, (eaptr)
+    sw t3, (dptr)
+    j main_loop
 
 
                                         op0_0100: op0_0101: op0_0110: op0_0111:

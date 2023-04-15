@@ -216,6 +216,13 @@ int main()
 	}
 #else
     static const char *testfns[] = {
+        "rom:/EXG.btest",
+
+        "rom:/BTST.btest",
+        "rom:/BCHG.btest",
+        "rom:/BSET.btest",
+        "rom:/BCLR.btest",
+
         "rom:/CMPA.w.btest",
         "rom:/CMPA.l.btest",
         "rom:/CMP.b.btest",
