@@ -1259,11 +1259,10 @@ OP(ori):
 
 OP(and):
     li t1, 3<<6
-    and t0, opcode, t1
-    beq t0, t1, op_mul
-    li t1, 4<<6
-    and t0, opcode, t1
-    beq t0, t1, op_exg
+    and t0, opcode, t1                      # Whan opsize is 3
+    beq t0, t1, op_mul                      # ... it is the MUL opcode instead
+    andi t0, opcode, (1<<8) | (0b110 << 3)  # When EA-Dst (bit 8) and EA mode An/Dn (bit 3-5: 000/001)
+    beq t0, 1<<8, op_exg                    # ... it is the EXG opcode instead
     lax rmw_op, op_and_rmwimpl
     j op_group_logical
 op_and_rmwimpl:
