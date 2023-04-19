@@ -11,6 +11,12 @@
 #define LINE_CLOCK        (FRAME_CLOCK / 264)
 #define WATCHDOG_PERIOD   3244030
 
+#ifdef N64
+#define USE_M64K          1
+#else
+#define USE_M64K          0
+#endif
+
 #define MAX_EVENTS 8
 
 typedef uint32_t (*EmuEventCb)(void *cbarg);
@@ -27,5 +33,8 @@ void emu_change_event(int event_id, int64_t clock);
 int64_t emu_clock(void);
 int64_t emu_clock_frame(void);
 uint32_t emu_pc(void);
+
+void emu_cpu_reset(void);
+void emu_cpu_irq(int level, bool state);
 
 #endif

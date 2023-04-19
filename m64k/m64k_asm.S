@@ -164,13 +164,13 @@ opshiftsmem:
 .endm
 
 .macro map_m68k dst, src
-    #if M68K_CONFIG_MEMORY_BASE == 0x00000000
+    #if M64K_CONFIG_MEMORY_BASE == 0x00000000
         .ifnb \src
         and \dst, \src, mmap_mask
         .else
         and \dst, mmap_mask
         .endif
-    #elif M68K_CONFIG_MEMORY_BASE == 0xFF000000
+    #elif M64K_CONFIG_MEMORY_BASE == 0xFF000000
         .ifnb \src
         or \dst, \src, mmap_mask
         .else
@@ -201,10 +201,10 @@ _m64k_asmrun:
     sd s8,96(sp)
     sd ra,104(sp)
 
-    #if M68K_CONFIG_MEMORY_BASE == 0x00000000 
+    #if M64K_CONFIG_MEMORY_BASE == 0x00000000 
     li mmap_mask, 0x00FFFFFF
     #else
-    li mmap_mask, M68K_CONFIG_MEMORY_BASE
+    li mmap_mask, M64K_CONFIG_MEMORY_BASE
     #endif
     la lax_base, LAX_BASE_ADDR
     dli zx64_mask, 0x00000000FFFFFFFF
@@ -224,9 +224,14 @@ _m64k_asmrun:
     jal reload_sr
     nop
 
+    sw m_cycles, M64K_OFF_TS_START(m64k)
+
 ALIGN(main_loop): OP(nop):
     blez m_cycles, main_loop_exit
+    sw m_cycles, M64K_OFF_TS_CUR(m64k)
+    lbu t0, M64K_OFF_CHECK_INTERRUPTS(m64k)
     lhu opcode, 0(m_pc)
+    bnez t0, check_interrupt
     #if M64K_CONFIG_ADDRERR
     sw opcode, M64K_OFF_IR(m64k)
     #endif
@@ -276,6 +281,25 @@ OP(shifts):
     jr t0
     li opsize, 2
 
+check_interrupt:
+    beq t0, 2, main_loop_exit
+    sb zero, M64K_OFF_CHECK_INTERRUPTS(m64k)
+    # Check if a NMI is pending
+    lbu t0, M64K_OFF_NMI_PENDING(m64k)
+    bnez t0, raise_irq
+    li t1, 7
+    # Check if IPL > SR.irq_mask
+    lbu t0, M64K_OFF_SR+2(m64k)
+    lbu t1, M64K_OFF_IPL(m64k)
+    andi t0, 7
+    ble t1, t0, main_loop
+raise_irq:
+    # Raise an IRQ (level in t1)
+    li t0, M64K_PENDINGEXC_IRQ
+    sw_m64k t0, M64K_OFF_PENDINGEXC+0
+    j main_loop_exit
+    sw_m64k t1, M64K_OFF_PENDINGEXC+4
+
 
 main_loop_exit:
     lw t0, pc_diff
@@ -284,6 +308,8 @@ main_loop_exit:
     #if !M64K_CONFIG_ADDRERR
     sw opcode, M64K_OFF_IR(m64k)
     #endif
+
+    sw zero, M64K_OFF_TS_START(m64k)
 
     jal flush_sr
     nop
@@ -370,6 +396,9 @@ reload_sr:
     andi t1, 4
     lw_m64k t2, M64K_OFF_USP,t1       # Copy USP/SSP to A7
     sw_m64k t2, M64K_OFF_AREGS+7*4
+
+    li t1, 1
+    sb t1, M64K_OFF_CHECK_INTERRUPTS(m64k)
 
     jr ra
     nop

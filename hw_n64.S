@@ -4,18 +4,36 @@
 #define C0_BADVADDR	       $8
 #define C0_CAUSE_TLBSTORE   3
 
+.macro PROFILE_START
+	mfc0 k0, C0_COUNT
+	lw k1, hw_io_profile
+	sub k1, k0
+	la k0, hw_io_profile
+	sw k1, 0(k0)
+.endm
+
+.macro PROFILE_END
+	mfc0 k0, C0_COUNT
+	lw k1, hw_io_profile
+	add k1, k0
+	la k0, hw_io_profile
+	sw k1, 0(k0)
+.endm
+
 	.set noreorder
 	.set noat
 
 mvs_tlbhandler:
+	PROFILE_START
 	# Check whether the faulting address is in one of these ranges:
-	#  * 0x2nnnnn: PBROM area (banked)
-	#  * 0x3nnnnn: hardware register of MVS
-	#  * 0x4nnnnn: palette RAM (go through handlers for conversion to RGB32)
+	#  * 0xFF2nnnnn: PBROM area (banked)
+	#  * 0xFF3nnnnn: hardware register of MVS
+	#  * 0xFF4nnnnn: palette RAM (go through handlers for conversion to RGB32)
 	mfc0 k1, C0_BADVADDR
-	nop
+	sll k1, 8
+	srl k1, 8
 	srl k0, k1, 20
-	addi k0, -2
+	addi k0, -0x2
 	beqz k0, tlb_start
 	addi k0, -1
 	beqz k0, tlb_start
@@ -134,6 +152,8 @@ tlb_readhwio:
 	# We're ready to call the memory handler. Use read_hwio for HWIO reads,
 	# and video_palette_r for palette reads.
 	mfc0 a0, C0_BADVADDR
+	sll a0, 8
+	srl a0, 8
 	srl t0, a0, 20
 	beq t0, 4, tlb_readhwio_palette
 	nop
@@ -326,6 +346,8 @@ tlb_writehwio_do:
 	# Call the memory handler. write_hwio for HWIO, and video_palette_w for
 	# palette RAM.
 	mfc0 a0, C0_BADVADDR
+	sll a0, 8
+	srl a0, 8
 	srl t0, a0, 20
 	beq t0, 4, tlb_writehwio_palette
 	nop
@@ -396,6 +418,7 @@ tlbdone:
 	mtc0 k0, C0_EPC
 	nop  # 2 hazards before eret
 	nop
+	PROFILE_END
 	eret
 
 tlb_done_delayslot:
@@ -426,13 +449,14 @@ tlb_done_delayslot_branch16:
 	mtc0 k0, C0_EPC
 	nop  # 2 hazards before eret
 	nop
+	PROFILE_END
 	eret
 
 tlb_done_delayslot_jump26:
 	# The 26 bit offset is left-shifted by 2, and placed into
 	# EPC, keeping the highest 6 bits (the region).
 	sll k1, k0, 6
-	srl k1, 2
+	srl k1, 6-2
 	mfc0 k0, C0_EPC
 	nop
 	srl k0, 26
@@ -441,13 +465,34 @@ tlb_done_delayslot_jump26:
 	mtc0 k0, C0_EPC
 	nop  # 2 hazards before eret
 	nop
+	PROFILE_END
 	eret
 
 tlb_done_delayslot_indirect:
 	# TODO: not implemented. We just checked that this is a SPECIAL opcode
-	# (so it should be either JR or JALR). Anyway, just go to the fallback
+	# (so it should be either JR or JALR). We only implment JR RA for now.
+	li k1, 0x03e00008
+	beq k0, k1, tlb_done_delayslot_jr_ra
+	nop
+	li k1, 0x01e0f809
+	beq k0, k1, tlb_done_delayslot_jalr_t7
+	nop
 	j tlbfallback
 	nop
+
+tlb_done_delayslot_jalr_t7:
+	mtc0 t7, C0_EPC
+	nop  # 2 hazards before eret
+	nop
+	PROFILE_END
+	eret
+
+tlb_done_delayslot_jr_ra:
+	mtc0 ra, C0_EPC
+	nop  # 2 hazards before eret
+	nop
+	PROFILE_END
+	eret
 
 
 tlbfallback:

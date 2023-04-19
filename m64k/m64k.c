@@ -11,8 +11,9 @@
 #define SR_INT  0x0700  // Interrupt mask
 
 // Convert a m68k address (24 bit) to a pointer in the N64 memory space
-#define M64K_PTR(a)   ((void*)(((a) & 0x00FFFFFF) + M68K_CONFIG_MEMORY_BASE))
+#define M64K_PTR(a)   ((void*)(((a) & 0x00FFFFFF) + M64K_CONFIG_MEMORY_BASE))
 
+#define RM16(a)     (*(  uint16_t*)M64K_PTR(a))
 #define RM32(a)     (*(u_uint32_t*)M64K_PTR(a))
 #define WM32(a, v)  (*(u_uint32_t*)M64K_PTR(a) = (v))
 #define WM16(a, v)  (*(  uint16_t*)M64K_PTR(a) = (v))
@@ -47,6 +48,19 @@ static inline void exc_push16(m64k_t *m64k, uint16_t v)
     WM16(m64k->ssp, v);
 }
 
+void m64k_init(m64k_t *m64k)
+{
+    memset(m64k, 0, sizeof(*m64k));
+    m64k->sr = 0x2700;
+}
+
+void m64k_pulse_reset(m64k_t *m64k)
+{
+    m64k->sr  = 0x2700;
+    m64k->ssp = RM32(0);
+    m64k->pc  = RM32(4);
+}
+
 void m64k_exception_address(m64k_t *m64k, uint32_t address, uint16_t fc)
 {
     uint32_t oldsr = m64k->sr;
@@ -54,11 +68,11 @@ void m64k_exception_address(m64k_t *m64k, uint32_t address, uint16_t fc)
     m64k->sr &= ~(SR_T0 | SR_T1);
     m64k->sr |= SR_S;
 
-    exc_push32(m64k, m64k->pc);
-    exc_push16(m64k, oldsr);
-    exc_push16(m64k, m64k->ir);
-    exc_push32(m64k, address);
-    exc_push16(m64k, fc);
+    exc_push32(m64k, m64k->pc);  // cdef
+    exc_push16(m64k, oldsr);     // ab
+    exc_push16(m64k, m64k->ir);  // 89
+    exc_push32(m64k, address);   // 4567
+    exc_push16(m64k, fc);        // 23
 
     m64k->pc = RM32(m64k->vbr + 0x3*4);
     m64k->cycles += __m64k_exception_cycle_table[0x3];
@@ -78,22 +92,46 @@ void m64k_exception_divbyzero(m64k_t *m64k)
     m64k->cycles += __m64k_exception_cycle_table[0x5];
 }
 
-void m64k_init(m64k_t *m64k)
+void m64k_exception_interrupt(m64k_t *m64k, int level)
 {
-    memset(m64k, 0, sizeof(*m64k));
-    m64k->sr = 0x2700;
+    if (m64k->hook_irqack) {
+        m64k->hook_irqack(m64k->hook_irqack_ctx, level);
+    } else {
+        // Auto-ack the interrupt for simpler cases
+        if (m64k->virq[level]) 
+            m64k_set_virq(m64k, level, false);
+        else
+            m64k_set_irq(m64k, 0);
+    }
+
+    uint32_t oldsr = m64k->sr;
+
+    m64k->sr &= ~(SR_T0 | SR_T1 | SR_INT);
+    m64k->sr |= SR_S | (level << 8);
+
+    uint32_t pc = RM32(m64k->vbr + (24 + level)*4);
+    if (pc == 0)
+        pc = RM32(m64k->vbr + 15*4);
+
+    exc_push32(m64k, m64k->pc);
+    exc_push16(m64k, oldsr);
+
+    m64k->pc = pc;
+    m64k->cycles += __m64k_exception_cycle_table[24 + level];
 }
 
-void m64k_run(m64k_t *m64k, int64_t until)
+int64_t m64k_run(m64k_t *m64k, int64_t until)
 {
     while (until > m64k->cycles) {
-        int c = _m64k_asmrun(m64k, until - m64k->cycles);
-        m64k->cycles += until - c;
+        int timeslice = until - m64k->cycles;
+        int remaining = _m64k_asmrun(m64k, timeslice);
+        m64k->cycles += timeslice - remaining;
 
         if (__builtin_expect(m64k->pending_exc[0] != 0, 0)) {
             switch (m64k->pending_exc[0]) {
             #if M64K_CONFIG_ADDRERR
             case M64K_PENDINGEXC_ADDRERR:
+                debugf("[m64k] address error\n");
                 m64k_exception_address(m64k, m64k->pending_exc[1], m64k->pending_exc[2]);
                 break;
             #endif
@@ -101,7 +139,12 @@ void m64k_run(m64k_t *m64k, int64_t until)
                 debugf("[m64k] RSTO asserted\n");
                 break;
             case M64K_PENDINGEXC_DIVBYZERO:
+                debugf("[m64k] division by zero\n");
                 m64k_exception_divbyzero(m64k);
+                break;
+            case M64K_PENDINGEXC_IRQ:
+                debugf("[m64k] IRQ %ld\n", m64k->pending_exc[1]);
+                m64k_exception_interrupt(m64k, m64k->pending_exc[1]);
                 break;
             default:
                 assertf(0, "Unhandled pending exception: %ld", m64k->pending_exc[0]);
@@ -109,4 +152,56 @@ void m64k_run(m64k_t *m64k, int64_t until)
             m64k->pending_exc[0] = 0;
         }
     }
+
+    debugf("SR: %04lx PC: %08lx\n", m64k->sr, m64k->pc);
+    return m64k->cycles;
+}
+
+void m64k_set_irq(m64k_t *m64k, int level)
+{
+    if (level == 7 && m64k->ipl < 7) {
+        m64k->nmi_pending = 1;
+    }
+    m64k->ipl = level;
+    m64k->check_interrupts = 1;
+}
+
+void m64k_set_virq(m64k_t *m64k, int irq, bool on)
+{
+    m64k->virq[irq] = on;
+    if (on) {
+        if (m64k->ipl < irq)
+            m64k_set_irq(m64k, irq);
+    } else {
+        for (int i=7; i>=0; i--) {
+            if (m64k->virq[i]) {
+                m64k_set_irq(m64k, i);
+                break;
+            }
+        }
+    }
+}
+
+uint32_t m64k_get_pc(m64k_t *m64k)
+{
+    // FIXME: fix while m68k is running
+    return m64k->pc;
+}
+
+int64_t m64k_get_clock(m64k_t *m64k)
+{
+    if (!m64k->ts_start)
+        return m64k->cycles;
+    return m64k->cycles + (m64k->ts_start - m64k->ts_cur);
+}
+
+void m64k_run_stop(m64k_t *m64k)
+{
+    m64k->check_interrupts = 2;
+}
+
+void m64k_set_hook_irqack(m64k_t *m64k, int (*hook)(void *ctx, int level), void *ctx)
+{
+    m64k->hook_irqack = hook;
+    m64k->hook_irqack_ctx = ctx;
 }

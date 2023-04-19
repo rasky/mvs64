@@ -5,7 +5,11 @@
 #include "roms.h"
 #include "video.h"
 #include "emu.h"
+#if USE_M64K
+#include "m64k/m64k.h"
+#else
 #include "m68k.h"
+#endif
 #include "platform.h"
 
 // Typedefs for unaligned memory accesses
@@ -67,7 +71,7 @@ void write_pbrom(uint32_t addr, uint32_t val, int sz) {
 		return;
 	}
 
-	debugf("[CART] unknown write%d: %06x <- %0*x (PC:%08x)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, m68k_get_reg(NULL, M68K_REG_PC));
+	debugf("[CART] unknown write%d: %06x <- %0*x (PC:%08lx)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, emu_pc());
 }
 
 uint32_t read_pbrom(uint32_t addr, int sz) {
@@ -95,9 +99,11 @@ uint32_t read_hwio(uint32_t addr, int sz)  {
 	}
 
 	// Idle skip for RTC Wait Pulse in BIOS boot
-	if (addr == 0x320001 && m68k_get_reg(NULL, M68K_REG_PC) == 0xC11DA2) {
+	#if 0
+	if (addr == 0x320001 && emu_pc() == 0xC11DA2) {
 		m68k_consume_timeslice();
 	}
+	#endif
 
 	// debugf("[HWIO] read%d: %06x (68K PC:%x)\n", sz*8, (unsigned int)addr, m68k_get_reg(NULL, M68K_REG_PC));
 	// debugf("[HWIO] read%d: %06x (68K PC:%x EPC:%lx)\n", sz*8, (unsigned int)addr, m68k_get_reg(NULL, M68K_REG_PC), C0_READ_EPC());
@@ -159,10 +165,10 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 		case 0x02: assert(sz==2); lspc_vram_data_w(val); return;
 		case 0x04: assert(sz==2); lspc_vram_modulo_w(val); return;
 		case 0x06: assert(sz==2); lspc_mode_w(val); return;
-		case 0x0C: if (val&1) m68k_set_virq(3,false); if (val&2) m68k_set_virq(2,false); if (val&4) m68k_set_virq(1,false); return;
+		case 0x0C: if (val&1) emu_cpu_irq(3,false); if (val&2) emu_cpu_irq(2,false); if (val&4) emu_cpu_irq(1,false); return;
 	}
 
-	debugf("[HWIO] unknown write%d: %06x <- %0*x (PC=%06x)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, m68k_get_reg(NULL, M68K_REG_PC));
+	debugf("[HWIO] unknown write%d: %06x <- %0*x (PC=%06lx)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, emu_pc());
 }
 
 
@@ -243,6 +249,7 @@ unsigned int m68k_read_disassembler_32(unsigned int address) {
 
 #ifdef N64
 
+#if 0
 #define C0_INDEX() ({ \
     uint32_t x; \
     asm volatile("mfc0 %0,$0":"=r"(x)); \
@@ -270,6 +277,7 @@ unsigned int m68k_read_disassembler_32(unsigned int address) {
 #define C0_TLBWI()           asm volatile("tlbwi; nop; nop; nop; nop")
 #define C0_TLBR()            asm volatile("tlbr; nop; nop; nop; nop")
 #define C0_TLBP()            asm volatile("tlbp; nop; nop; nop; nop")
+#endif
 
 void tlb_init(void) {
 	C0_WRITE_ENTRYHI(0xFFFFFFFF);
@@ -358,18 +366,24 @@ void hw_init(void) {
 	banks[0xD] = (Bank){ BACKUP_RAM,       0x0FFFF,   NULL,            write_unk };
 
 	#ifdef N64
+	#if USE_M64K
+		#define VBASE M64K_CONFIG_MEMORY_BASE
+	#else
+		#define VBASE 0
+	#endif
+
 	disable_interrupts();
 	tlb_init();
-	tlb_map_area(0, 0x000000, 0x7FFFF, P_ROM+0x000000, false);
-	tlb_map_area(1, 0x080000, 0x7FFFF, P_ROM+0x080000, false);
+	tlb_map_area(0, VBASE+0x000000, 0x7FFFF, P_ROM+0x000000, false);
+	tlb_map_area(1, VBASE+0x080000, 0x7FFFF, P_ROM+0x080000, false);
 	if (PB_ROM) {
-		tlb_map_area(2, 0x200000, 0x7FFFF, PB_ROM+0x000000, false);
-		tlb_map_area(3, 0x280000, 0x7FFFF, PB_ROM+0x080000, false);		
+		tlb_map_area(2, VBASE+0x200000, 0x7FFFF, PB_ROM+0x000000, false);
+		tlb_map_area(3, VBASE+0x280000, 0x7FFFF, PB_ROM+0x080000, false);		
 	}
-	tlb_map_area(4, 0xC00000, 0x1FFFF, BIOS, false);
+	tlb_map_area(4, VBASE+0xC00000, 0x1FFFF, BIOS, false);
 
-	tlb_map_area(8, 0x100000, 0x0FFFF, WORK_RAM, true);
-	tlb_map_area(9, 0xD00000, 0x0FFFF, BACKUP_RAM, true);
+	tlb_map_area(8, VBASE+0x100000, 0x0FFFF, WORK_RAM, true);
+	tlb_map_area(9, VBASE+0xD00000, 0x0FFFF, BACKUP_RAM, true);
 
 	// Install special exception handler, so that we can handle our own
 	// exceptions

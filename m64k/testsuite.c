@@ -13,7 +13,7 @@ static void m68k_ram_init(void) {
 }
 
 static void m68k_ram_w8(uint32_t addr, uint8_t v) {
-    uint32_t page = (addr & ~0x1FFF) | M68K_CONFIG_MEMORY_BASE;
+    uint32_t page = (addr & ~0x1FFF) | M64K_CONFIG_MEMORY_BASE;
 
     for (int i=0;i<16;i++) {
         if (ram_address[i] == 0xFFFFFFFF) {
@@ -30,7 +30,7 @@ static void m68k_ram_w8(uint32_t addr, uint8_t v) {
 }
 
 static uint8_t m68k_ram_r8(uint32_t addr) {
-    uint32_t page = (addr & ~0x1FFF) | M68K_CONFIG_MEMORY_BASE;
+    uint32_t page = (addr & ~0x1FFF) | M64K_CONFIG_MEMORY_BASE;
     for (int i=0;i<16;i++) {
         if (ram_address[i] == page) {
             return ram_pages[i][addr & 0x1FFF];

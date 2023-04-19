@@ -2,15 +2,20 @@
 #include <stdbool.h>
 #include <string.h>
 #include "emu.h"
+#if USE_M64K
+#include "m64k/m64k.h"
+#else
 #include "m68k.h"
+#endif
 #include "hw.h"
 #include "video.h"
 #include "roms.h"
 #include "platform.h"
 
 static int cpu_trace_count = 0;
-
 void cpu_trace(unsigned int pc) {
+	(void)cpu_trace_count;
+	#if !USE_M64K
 	if (cpu_trace_count == 0) {
 		m68k_set_instr_hook_callback(NULL);
 		return;
@@ -40,24 +45,36 @@ void cpu_trace(unsigned int pc) {
 	debugf("\n");
 
 	cpu_trace_count--;
+	#endif
 }
 
 void cpu_start_trace(int cnt) {
 	#ifndef N64
+	#if !USE_M64K
 	m68k_set_instr_hook_callback(cpu_trace);
+	#endif
 	cpu_trace_count = cnt;
 	#endif
 }
 
 static int g_frame;
+#if USE_M64K
+static m64k_t m64k;
+#endif
 static uint64_t g_clock, g_clock_framebegin;
 static uint64_t m68k_clock;
 static EmuEvent events[MAX_EVENTS];
+uint32_t hw_io_profile;
 
 static uint64_t m68k_exec(uint64_t clock) {
 	clock /= M68K_CLOCK_DIV;
 	if (clock > m68k_clock) {
+		#if USE_M64K
+		debugf("m68k_exec: %d\n", (int)(clock - m68k_clock));
+		m68k_clock = m64k_run(&m64k, clock);
+		#else
 		m68k_clock += m68k_execute(clock - m68k_clock);	
+		#endif
 	}
 	return m68k_clock * M68K_CLOCK_DIV;
 }
@@ -87,24 +104,53 @@ int emu_add_event(int64_t clock, EmuEventCb cb, void *cbarg) {
 
 void emu_change_event(int event_id, int64_t newclock) {
 	events[event_id].clock = newclock;
-	if (events[event_id].current)
+	if (events[event_id].current) {
+		#if USE_M64K
+		m64k_run_stop(&m64k);
+		#else
 		m68k_end_timeslice();
+		#endif
+	}
 }
 
 int64_t emu_clock(void) {
+	#if USE_M64K
+	return m64k_get_clock(&m64k) * M68K_CLOCK_DIV;
+	#else
 	return g_clock + m68k_cycles_run() * M68K_CLOCK_DIV;
+	#endif
 }
 
 int64_t emu_clock_frame(void) {
 	return emu_clock() - g_clock_framebegin;
 }
 
+void emu_cpu_reset(void) {
+	#if USE_M64K
+	m64k_pulse_reset(&m64k);
+	#else
+	m68k_pulse_reset();
+	#endif
+}
+
 uint32_t emu_pc(void) {
-	return m68k_get_reg(NULL, M68K_REG_PC);
+	#if USE_M64K
+	return m64k_get_pc(&m64k) & 0xFFFFFF;
+	#else
+	return m68k_get_reg(NULL, M68K_REG_PC) & 0xFFFFFF;
+	#endif
+}
+
+void emu_cpu_irq(int irq, bool on) {
+	#if USE_M64K
+	m64k_set_virq(&m64k, irq, on);
+	#else
+	m68k_set_virq(irq, on);
+	#endif
 }
 
 uint32_t emu_vblank_start(void* arg) {
-	m68k_set_virq(1, true);
+	emu_cpu_irq(1, true);
 	hw_vblank();
 	debugf("[EMU] VBlank - clock:%lld clock_frame:%lld\n", emu_clock(), emu_clock_frame());
 	return FRAME_CLOCK;
@@ -156,18 +202,27 @@ int main(int argc, char *argv[]) {
 	rom_load(argv[1]);
 	#endif
 
+	#if USE_M64K
+	m64k_init(&m64k);
+	#else
 	m68k_init();
+	#endif
 
 	hw_init();
 	g_clock = 0;
 
+	#if USE_M64K
+	m64k_pulse_reset(&m64k);
+	#else
 	m68k_set_cpu_type(M68K_CPU_TYPE_68000);
-	m68k_pulse_reset();
+	m68k_pulse_reset();	
+	#endif
 	m68k_clock = 0;
 
 	emu_add_event(LINE_CLOCK*248, emu_vblank_start, NULL);
 
 	for (int i=0;i<7000000;i++) {
+		hw_io_profile = 0;
 		#ifdef N64
 		uint32_t t0 = TICKS_READ();
 		#endif
@@ -186,10 +241,15 @@ int main(int argc, char *argv[]) {
 		#ifdef N64
 		uint32_t draw_time = TICKS_READ();
 
-		debugf("[PROFILE] cpu:%.2f%% draw:%.2f%% PC:%06x\n",
+		debugf("[PROFILE] cpu:%.2f%% io:%.2f%% draw:%.2f%% PC:%06lx\n",
 			(float)TICKS_DISTANCE(t0, emu_time) * 100.f / (float)(TICKS_PER_SECOND / 60),
+			(float)hw_io_profile * 100.f / (float)(TICKS_PER_SECOND / 60),
 			(float)TICKS_DISTANCE(emu_time, draw_time) * 100.f / (float)(TICKS_PER_SECOND / 60),
-			m68k_get_reg(NULL, M68K_REG_PC));
+			#if USE_M64K
+			m64k_get_pc(&m64k));
+			#else
+			(uint32_t)m68k_get_reg(NULL, M68K_REG_PC));
+			#endif
 		#endif
 
 		rom_next_frame();
@@ -199,7 +259,9 @@ int main(int argc, char *argv[]) {
 	cpu_start_trace(1000);
 	m68k_exec(g_clock+100);
 
+	#if !USE_M64K
 	fprintf(stderr, "SR=%04x\n", m68k_get_reg(NULL, M68K_REG_SR));
+	#endif
 	#ifndef N64
 	FILE *f = fopen("vram.dump", "wb");
 	fwrite(VIDEO_RAM, 1, sizeof(VIDEO_RAM), f);

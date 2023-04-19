@@ -368,6 +368,7 @@ void rom_load(const char *dir) {
 		rom_pc_idle_skip = ini_get_integer(ini, "idle_skip", &ok);
 		if (ok) debugf("[ROM] configure idle_skip: %x\n", rom_pc_idle_skip);
 	}
+	rom_pc_idle_skip = 0;
 
 	#ifdef N64
 	dir = "";

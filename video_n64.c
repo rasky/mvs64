@@ -43,7 +43,7 @@ static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int s
 	const int tmem_addr = rdp_tex_slot * 16 * 8;
 	rdpq_set_texture_image_raw(0, PhysicalAddr(src), FMT_RGBA16, 16/4, 16);
 	rdpq_set_tile(TILE1, FMT_RGBA16, tmem_addr, 0, 0);
-	rdpq_set_tile(TILE0, FMT_CI4, tmem_addr, pitch, pal_slot);
+	rdpq_set_tile(TILE0, FMT_CI4, tmem_addr, pitch, &(rdpq_tileparms_t){ .palette = pal_slot });
 	rdpq_set_tile_size(TILE0, 0, 0, 16, 16);
 	rdpq_load_block(TILE1, 0, 0, 16*16/4, pitch);
 
@@ -149,7 +149,7 @@ static void draw_sprite_fix(int spritenum, int palnum, int x, int y) {
 
 	if (palnum != fix_last_palnum) {
 		fix_last_palnum = palnum;
-		rdpq_set_tile(TILE0, FMT_CI4, FIX_TMEM_ADDR, FIX_TMEM_PITCH, palnum);
+		rdpq_set_tile(TILE0, FMT_CI4, FIX_TMEM_ADDR, FIX_TMEM_PITCH, &(rdpq_tileparms_t){ .palette = palnum });;
 		rdpq_set_tile_size(TILE0, 0, 0, 8, 8);
 	}
 
@@ -181,10 +181,12 @@ static void render_end_fix(void) {}
 
 static void render_begin(void) {
 	// Clear the screen
+	// rdpq_debug_log(true);
 	rdpq_set_mode_fill(color_from_packed16(PALETTE_RAM[PALETTE_RAM_BANK + 0xFFF]));
 	rdpq_fill_rectangle(0, 0, 320, 240);
 }
 
 static void render_end(void) {
 	rspq_flush();
+	// rdpq_debug_log(false);
 }
