@@ -79,7 +79,7 @@ void run_testsuite(const char *fn)
     FILE *f = asset_fopen(fn);
 
     bool asl_test = strstr(fn, "ASL.b.") != NULL;
-    bool asr_test = strstr(fn, "ASR.b.") != NULL;
+    bool asr_test = strstr(fn, "ASR.") != NULL;
 
     // Read ID
     char id[4]; fread(id, 1, 4, f); (void)id;
@@ -102,8 +102,6 @@ void run_testsuite(const char *fn)
         // skip buggy tests
         // see https://github.com/TomHarte/ProcessorTests/issues/21
         if (asl_test && (t == 1583-1 || t == 1761-1)) continue;
-        if (asr_test && t == 8-1) continue;
-        debugf("Running test: %s\n", name);
 
         // Run the test
         m64k_t m64k;
@@ -114,9 +112,6 @@ void run_testsuite(const char *fn)
         m64k.ssp = initial.ssp;
         m64k.pc = initial.pc;
         m64k.sr = initial.sr;
-        if ((m64k.sr & 0xFF00) != 0x2700) {
-            debugf("SR = %04lx\n", m64k.sr);
-        }
 
         m68k_ram_init();
         m68k_ram_w8(initial.pc+0, initial.prefetch[0] >> 8);
@@ -140,35 +135,46 @@ void run_testsuite(const char *fn)
         bool failed = false;
         for (int i=0; i<8; i++) {
             if (m64k.dregs[i] != final.dregs[i])  {
+                if (!failed) debugf("Running test: %s\n", name);
                 debugf("D%d: %08lx != %08lx\n", i, m64k.dregs[i], final.dregs[i]);
                 failed = true;
             }
         }
         for (int i=0; i<7; i++) {
             if (m64k.aregs[i] != final.aregs[i])  {
+                if (!failed) debugf("Running test: %s\n", name);
                 debugf("A%d: %08lx != %08lx\n", i, m64k.aregs[i], final.aregs[i]);
                 failed = true;
             }
         }
         if (m64k.usp != final.usp) {
+            if (!failed) debugf("Running test: %s\n", name);
             debugf("USP: %08lx != %08lx\n", m64k.usp, final.usp);
             failed = true;
         }
         if (m64k.ssp != final.ssp) {
+            if (!failed) debugf("Running test: %s\n", name);
             debugf("SSP: %08lx != %08lx\n", m64k.ssp, final.ssp);
             failed = true;
         }
+        if(asr_test) {
+            // buggy tests, ignore flags C and X
+            m64k.sr &= ~0x11; final.sr &= ~0x11;
+        }
         if (m64k.sr != final.sr) {
+            if (!failed) debugf("Running test: %s\n", name);
             debugf("SR: %08lx != %08lx\n", m64k.sr, final.sr);
             failed = true;
         }
         if (m64k.pc != final.pc) {
+            if (!failed) debugf("Running test: %s\n", name);
             debugf("PC: %08lx != %08lx\n", m64k.pc, final.pc);
             failed = true;
         }
         for (int i=0; i<final.nrams; i++) {
             uint8_t got = m68k_ram_r8(final.ram[i][0]);
             if (got != final.ram[i][1]) {
+                if (!failed) debugf("Running test: %s\n", name);
                 debugf("RAM[%lx] = %02x != %02lx\n", final.ram[i][0], got, final.ram[i][1]);
                 failed = true;
             }
@@ -315,9 +321,9 @@ int main()
         "rom:/ASL.b.btest",
         "rom:/ASL.l.btest",
         "rom:/ASL.w.btest",
-        // "rom:/ASR.b.btest",   // these seem too buggy
-        // "rom:/ASR.l.btest",   // these seem too buggy
-        // "rom:/ASR.w.btest",   // these seem too buggy
+        "rom:/ASR.b.btest",   // these seem too buggy
+        "rom:/ASR.l.btest",   // these seem too buggy
+        "rom:/ASR.w.btest",   // these seem too buggy
         "rom:/LSL.b.btest",
         "rom:/LSL.l.btest",
         "rom:/LSL.w.btest",
