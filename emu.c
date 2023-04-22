@@ -149,6 +149,17 @@ void emu_cpu_irq(int irq, bool on) {
 	#endif
 }
 
+#if USE_M64K
+int cpu_irqack(void *ctx, int level)
+{	
+	// On NeoGeo hardware, interrupts must be manually acknowledged via a write
+	// to register 0x3C000C. So we do nothing here.
+	// NOTE: we still must register this hook, otherwise the m64k core will
+	// by default auto-acnowledge the interrupts.
+	return 0;
+}
+#endif
+
 uint32_t emu_vblank_start(void* arg) {
 	emu_cpu_irq(1, true);
 	hw_vblank();
@@ -204,6 +215,7 @@ int main(int argc, char *argv[]) {
 
 	#if USE_M64K
 	m64k_init(&m64k);
+	m64k_set_hook_irqack(&m64k, cpu_irqack, NULL);
 	#else
 	m68k_init();
 	#endif
