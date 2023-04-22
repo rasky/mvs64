@@ -392,6 +392,7 @@ reload_sr:
     dsll flag_zc, t0, 32   # C to bit 32
     or flag_zc, t1
 
+reload_sr_chstack:
     srl t1, t0, 11                    # Isolate supervisor bit
     andi t1, 4
     lw_ctx t2, M64K_OFF_USP,t1       # Copy USP/SSP to A7
@@ -402,6 +403,10 @@ reload_sr:
 
     jr ra
     nop
+
+reload_stack: 
+    j reload_sr_chstack
+    lw t0, M64K_OFF_SR(ctx)
 
 
 ###############################################################
@@ -2185,6 +2190,33 @@ rte_exec:
     lwr eaptr32, 5(eaptr)
     jal_and_j reload_sr, jmp_exec       # reload flags/A7 using SR, and then jump to new PC
 
+OP(trap):
+    jal flush_stack
+    ori t1, SR_SUPERV
+    sw_ctx t1, M64K_OFF_SR
+    jal reload_stack
+
+    li t0, -6
+    jal pushn
+    lw result, pc_diff
+    addu result, m_pc
+    swl result, 2(t0)
+    swr result, 5(t0)
+
+    lw_ctx result, M64K_OFF_SR
+    sh result, 0(t0)
+
+    andi eaptr32, opcode, 0xF
+    addi eaptr32, 32
+    lw_ctx t1, M64K_OFF_VBR
+    sll eaptr32, 2
+    addu eaptr32, t1
+    map_m68k eaptr, eaptr32
+    check_addr_error eaptr32, read_address_error
+    lw eaptr32, 0(eaptr)
+    j jmp_exec
+
+
     #define bitidx_mask     result
 OP(bitsr):  # bit operation using a register as index
     jal_and_j decode_dptr, op_bits_start
@@ -2244,7 +2276,7 @@ op_exg_start:
 
 op_unk:
 # 68000+ instructions
-op_nbcd: op_trapv: op_stop: op_trap:
+op_nbcd: op_trapv: op_stop:
 op_roxl: op_roxm: op_roxli: op_roxlm: op_roxrm:
 # 68010+ instructions
 op_movec: op_bkpt: op_mvfccr: op_moves: op_rtd:
