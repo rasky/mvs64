@@ -58,7 +58,7 @@ opshiftsmem:
 #define ALIGN(lbl)  .balign 32; lbl
 
 #define OP(x)       .balign 32; op_##x
-#define m64k        a0
+#define ctx         a0
 #define m_cycles    a1    // cycles to execute (NOTE: must be kept caller-saved register)
 #define mmap_mask   a2
 #define _________   a3    // warning: used by move.m, check there before using it
@@ -70,48 +70,48 @@ opshiftsmem:
 #define eaptr       s1
 #define dptr        s2
 #define opsize      s4
-#define result      s5
+#define m_cyc_table s5
 #define flag_nv     s6    // bit 31: N; bit 63: N^V
 #define flag_zc     s7    // bit 0..31: !Z; bit 32: C
 #define flag_x      s8    // bit 0: X
 
 #define eaptr32       t4
 #define m_pc          t5
-#define m_cyc_table   t6
+#define result        t6
 #define rmw_op        t7    // RMW pointer to implementation function
 #define rmw_bitsize   t8    // RMW bitsize value useful in flag calcuation (24, 16, 0)
 #define rmw_srmask    t8    // for SR RMWs, it contains the mask for SR bits to be written
 
-.macro la_m64k  reg, offset,base
+.macro la_ctx  reg, offset,base
     .ifnb \base
         .set noat
-        add \reg, m64k, \base
+        add \reg, ctx, \base
         addi \reg, \offset
         .set at
     .else
-        add \reg, m64k, \offset
+        add \reg, ctx, \offset
     .endif
 .endm
 
-.macro lw_m64k  reg, offset,base
+.macro lw_ctx  reg, offset,base
     .ifnb \base
         .set noat
-        add $1, m64k, \base
+        add $1, ctx, \base
         lw \reg, \offset($1)
         .set at
     .else
-        lw \reg, \offset(m64k)
+        lw \reg, \offset(ctx)
     .endif
 .endm
 
-.macro sw_m64k  reg, offset,base
+.macro sw_ctx  reg, offset,base
     .ifnb \base
         .set noat
-        add $1, m64k, \base
+        add $1, ctx, \base
         sw \reg, \offset($1)
         .set at
     .else
-        sw \reg, \offset(m64k)
+        sw \reg, \offset(ctx)
     .endif
 .endm
 
@@ -209,8 +209,8 @@ _m64k_asmrun:
     la lax_base, LAX_BASE_ADDR
     dli zx64_mask, 0x00000000FFFFFFFF
     la m_cyc_table, __m64k_cycle_table
-    lw t1, M64K_OFF_PC(m64k)
-    lw t0, M64K_OFF_SR(m64k)
+    lw t1, M64K_OFF_PC(ctx)
+    lw t0, M64K_OFF_SR(ctx)
 
     # Convert PC to the N64 address space.
     map_m68k m_pc, t1
@@ -219,21 +219,21 @@ _m64k_asmrun:
 
     # Initialize dptr to a valid pointer, for ops that don't set it
     # and then ignore the read value.
-    move dptr, m64k
+    move dptr, ctx
 
     jal reload_sr
     nop
 
-    sw m_cycles, M64K_OFF_TS_START(m64k)
+    sw m_cycles, M64K_OFF_TS_START(ctx)
 
 ALIGN(main_loop): OP(nop):
     blez m_cycles, main_loop_exit
-    sw m_cycles, M64K_OFF_TS_CUR(m64k)
-    lbu t0, M64K_OFF_CHECK_INTERRUPTS(m64k)
+    sw m_cycles, M64K_OFF_TS_CUR(ctx)
+    lbu t0, M64K_OFF_CHECK_INTERRUPTS(ctx)
     lhu opcode, 0(m_pc)
     bnez t0, check_interrupt
     #if M64K_CONFIG_ADDRERR
-    sw opcode, M64K_OFF_IR(m64k)
+    sw opcode, M64K_OFF_IR(ctx)
     #endif
     addu t1, opcode, m_cyc_table
     lbu t1, 0(t1)
@@ -283,33 +283,33 @@ OP(shifts):
 
 check_interrupt:
     beq t0, 2, main_loop_exit
-    sb zero, M64K_OFF_CHECK_INTERRUPTS(m64k)
+    sb zero, M64K_OFF_CHECK_INTERRUPTS(ctx)
     # Check if a NMI is pending
-    lbu t0, M64K_OFF_NMI_PENDING(m64k)
+    lbu t0, M64K_OFF_NMI_PENDING(ctx)
     bnez t0, raise_irq
     li t1, 7
     # Check if IPL > SR.irq_mask
-    lbu t0, M64K_OFF_SR+2(m64k)
-    lbu t1, M64K_OFF_IPL(m64k)
+    lbu t0, M64K_OFF_SR+2(ctx)
+    lbu t1, M64K_OFF_IPL(ctx)
     andi t0, 7
     ble t1, t0, main_loop
 raise_irq:
     # Raise an IRQ (level in t1)
     li t0, M64K_PENDINGEXC_IRQ
-    sw_m64k t0, M64K_OFF_PENDINGEXC+0
+    sw_ctx t0, M64K_OFF_PENDINGEXC+0
     j main_loop_exit
-    sw_m64k t1, M64K_OFF_PENDINGEXC+4
+    sw_ctx t1, M64K_OFF_PENDINGEXC+4
 
 
 main_loop_exit:
     lw t0, pc_diff
     addu m_pc, t0
-    sw m_pc, M64K_OFF_PC(m64k)
+    sw m_pc, M64K_OFF_PC(ctx)
     #if !M64K_CONFIG_ADDRERR
-    sw opcode, M64K_OFF_IR(m64k)
+    sw opcode, M64K_OFF_IR(ctx)
     #endif
 
-    sw zero, M64K_OFF_TS_START(m64k)
+    sw zero, M64K_OFF_TS_START(ctx)
 
     jal flush_sr
     nop
@@ -352,16 +352,16 @@ flush_sr:
     sll t1, flag_x, 4
     or t0, t1
     
-    lw t1, M64K_OFF_SR(m64k)
+    lw t1, M64K_OFF_SR(ctx)
     and t1, ~CCR_MASK
     or t1, t0
-    sw t1, M64K_OFF_SR(m64k)
+    sw t1, M64K_OFF_SR(ctx)
 
 flush_sr_chstack:
     srl t0, t1, 11                        # Isolate supervisor bit
     andi t0, 4
-    lw_m64k t2, M64K_OFF_AREGS+7*4        # Copy A7 to USP/SSP
-    sw_m64k t2, M64K_OFF_USP,t0
+    lw_ctx t2, M64K_OFF_AREGS+7*4        # Copy A7 to USP/SSP
+    sw_ctx t2, M64K_OFF_USP,t0
 
     jr ra   # return SR in t1
     nop
@@ -370,7 +370,7 @@ flush_sr_chstack:
     # Return: t1 = SR
 flush_stack: 
     j flush_sr_chstack
-    lw t1, M64K_OFF_SR(m64k)
+    lw t1, M64K_OFF_SR(ctx)
 
 
     # Reload flag registers from SR bits.
@@ -394,11 +394,11 @@ reload_sr:
 
     srl t1, t0, 11                    # Isolate supervisor bit
     andi t1, 4
-    lw_m64k t2, M64K_OFF_USP,t1       # Copy USP/SSP to A7
-    sw_m64k t2, M64K_OFF_AREGS+7*4
+    lw_ctx t2, M64K_OFF_USP,t1       # Copy USP/SSP to A7
+    sw_ctx t2, M64K_OFF_AREGS+7*4
 
     li t1, 1
-    sb t1, M64K_OFF_CHECK_INTERRUPTS(m64k)
+    sb t1, M64K_OFF_CHECK_INTERRUPTS(ctx)
 
     jr ra
     nop
@@ -446,14 +446,14 @@ write_address_error:
     li t2, FC_DATA
 address_error:
     li t0, M64K_PENDINGEXC_ADDRERR
-    sw_m64k t0, M64K_OFF_PENDINGEXC+0
-    sw_m64k eaptr32, M64K_OFF_PENDINGEXC+4
+    sw_ctx t0, M64K_OFF_PENDINGEXC+0
+    sw_ctx eaptr32, M64K_OFF_PENDINGEXC+4
 
     # Most opcodes that generate an address error have a standard EA
     # encoding in bits 0..6, and we handle those just below. Some of them,
     # though, don't have a standard EA, so we need to handle with separate
     # code.
-    lw_m64k t1, M64K_OFF_IR       # Check original opcode
+    lw_ctx t1, M64K_OFF_IR       # Check original opcode
     andi t0, t1, 0xF000
     beq t0, 0x1000, addrerr_fixup_move # Fixup for MOVE (src/dst EA)
     beq t0, 0x2000, addrerr_fixup_move # Fixup for MOVE (src/dst EA)
@@ -482,14 +482,14 @@ addrerr_adjust_pc:
     lb t0, addrerr_pcoff(t0)             # PC offset
     add m_pc, t0                         # Rollback PC
 addrerr_finish:
-    lw_m64k opcode, M64K_OFF_IR          # Restore original opcode
+    lw_ctx opcode, M64K_OFF_IR          # Restore original opcode
     andi t0, opcode, 0xFFE0
     or t0, t2                            # Merge FC code (with read/write flag)
-    lw_m64k t1, M64K_OFF_SR              # Check if we were running in supervisor mode
+    lw_ctx t1, M64K_OFF_SR              # Check if we were running in supervisor mode
     andi t1, SR_SUPERV
     beqz t1, 1f
     ori t0, FC_SUPERV                    # Mark supervisor FC bit
-1:  sw_m64k t0, M64K_OFF_PENDINGEXC+8    # Store FC
+1:  sw_ctx t0, M64K_OFF_PENDINGEXC+8    # Store FC
 
     # Check if we need fixups
     andi t0, opcode, 0xF138              
@@ -514,14 +514,14 @@ addrerr_fixup_addq:
     # Decode LHS operand (Ry)
 1:  andi t0, opcode, 0x7
     sll t0, 2
-    la_m64k lhs, M64K_OFF_AREGS,t0
+    la_ctx lhs, M64K_OFF_AREGS,t0
     lw t0, 0(lhs)
     andi t2, t0, 1   # check if LHS is odd
     beqz t2, 1f      # jump to RHS odd
 
     add t0, t1       # adjust LHS to the expected error address
     sw t0, 0(lhs)
-    sw_m64k t0, M64K_OFF_PENDINGEXC+4  # store LHS as address error
+    sw_ctx t0, M64K_OFF_PENDINGEXC+4  # store LHS as address error
     addi m_pc, -2                      # adjust expected PC
     j main_loop_exit
 
@@ -529,11 +529,11 @@ addrerr_fixup_addq:
     # Decode RHS operand (Ry)
     srl t0, opcode, 7
     andi t0, 0x7 << 2
-    la_m64k rhs, M64K_OFF_AREGS,t0
+    la_ctx rhs, M64K_OFF_AREGS,t0
     lw t0, 0(rhs)                      # read RHS
     add t0, t1                         # adjust RHS to the expected error address
     sw t0, 0(rhs)                      # write RHS
-    sw_m64k t0, M64K_OFF_PENDINGEXC+4  # store RHS as address error
+    sw_ctx t0, M64K_OFF_PENDINGEXC+4  # store RHS as address error
     j main_loop_exit
     #undef lhs
     #undef rhs
@@ -547,10 +547,10 @@ addrerr_fixup_move:
     # affects the stack frame.
 
     # Restore original opcode and prepare standard FC code.
-    lw_m64k opcode, M64K_OFF_IR
+    lw_ctx opcode, M64K_OFF_IR
     andi t0, opcode, 0xFFE0
     or t0, 0x5
-    sw_m64k t0, M64K_OFF_PENDINGEXC+8    # Store FC
+    sw_ctx t0, M64K_OFF_PENDINGEXC+8    # Store FC
 
 addrerr_fixup_move_dst:
     # Check destination EA
@@ -573,7 +573,7 @@ addrerr_fixup_move_dst:
 addrerr_fixup_move_postincr: # (An)+
     srl t0, opcode, 7                  # Extract An register number
     andi t0, 0x7 << 2
-    la_m64k t1, M64K_OFF_AREGS,t0      # Revert the post-increment
+    la_ctx t1, M64K_OFF_AREGS,t0      # Revert the post-increment
     lw t0, 0(t1)
     sub t0, opsize
     sw t0, 0(t1)
@@ -584,13 +584,13 @@ addrerr_fixup_move_predecr: # -(An)
     bne opsize, 4, main_loop_exit      # 16-bit: no fixup
     srl t0, opcode, 7                  # Extract An register number
     andi t0, 0x7 << 2
-    la_m64k t1, M64K_OFF_AREGS,t0      # Revert half of the pre-decrement
+    la_ctx t1, M64K_OFF_AREGS,t0      # Revert half of the pre-decrement
     lw t0, 0(t1)
     add t0, 2
     sw t0, 0(t1)
-    lw_m64k t0, M64K_OFF_PENDINGEXC+4  # Adjust also the exception address
+    lw_ctx t0, M64K_OFF_PENDINGEXC+4  # Adjust also the exception address
     add t0, 2
-    sw_m64k t0, M64K_OFF_PENDINGEXC+4
+    sw_ctx t0, M64K_OFF_PENDINGEXC+4
     j main_loop_exit
 
 addrerr_fixup_move_areg:    # (An)
@@ -625,9 +625,9 @@ addrerr_fixup_rtr:
     j addrerr_finish
 
 addrerr_fixup_jsr:
-    lw_m64k t0, M64K_OFF_AREGS+7*4     # revert SP-=4 performed by JSR
+    lw_ctx t0, M64K_OFF_AREGS+7*4     # revert SP-=4 performed by JSR
     addiu t0, 4
-    sw_m64k t0, M64K_OFF_AREGS+7*4
+    sw_ctx t0, M64K_OFF_AREGS+7*4
 addrerr_fixup_jmp:
     addiu m_pc, -2
     j main_loop_exit
@@ -636,9 +636,9 @@ addrerr_fixup_movem_rm:
     # We use a shared implementation between reg->mem and mem->reg, so
     # we always generate a read_address_error. Change to write when the
     # opcode is reg->mem.
-    lw_m64k t0, M64K_OFF_PENDINGEXC+8
+    lw_ctx t0, M64K_OFF_PENDINGEXC+8
     xori t0, FC_READ
-    sw_m64k t0, M64K_OFF_PENDINGEXC+8
+    sw_ctx t0, M64K_OFF_PENDINGEXC+8
 
     andi t0, opcode, 1<<6                # check if word transfer
     beqz t0, main_loop_exit              # if word, fixup is finished
@@ -646,9 +646,9 @@ addrerr_fixup_movem_rm:
     bne t0, 4<<3, main_loop_exit         # otherwise, fixup is finished
     andi t0, opcode, 7
     sll t0, 2
-    lw_m64k t1, M64K_OFF_PENDINGEXC+4
+    lw_ctx t1, M64K_OFF_PENDINGEXC+4
     addiu t1, 2
-    sw_m64k t1, M64K_OFF_PENDINGEXC+4
+    sw_ctx t1, M64K_OFF_PENDINGEXC+4
     j main_loop_exit
 
 addrerr_fixup_movem_mr:
@@ -659,9 +659,9 @@ addrerr_fixup_movem_mr:
     
     andi t0, opcode, 7
     sll t0, 2
-    lw_m64k t1, M64K_OFF_AREGS,t0        # Revert the post-increment
+    lw_ctx t1, M64K_OFF_AREGS,t0        # Revert the post-increment
     addiu t1, -2
-    sw_m64k t1, M64K_OFF_AREGS,t0
+    sw_ctx t1, M64K_OFF_AREGS,t0
     j main_loop_exit
 
 address_fixup_cmpm:
@@ -678,12 +678,12 @@ address_fixup_cmpm:
 check_supervisor:
     .set reorder
     .set noat
-    lw_m64k $1, M64K_OFF_SR
+    lw_ctx $1, M64K_OFF_SR
     andi $1, SR_SUPERV
     bnez $1, 1f
 
     li $1, M64K_PENDINGEXC_PRIVERR
-    sw_m64k t0, M64K_OFF_PENDINGEXC
+    sw_ctx t0, M64K_OFF_PENDINGEXC
     j main_loop_exit
 1:  jr ra
     .set at
@@ -702,7 +702,7 @@ exc_dbz_pcoff: .byte -2,-2,-2,-2,-2,-4,-4,-2
 exception_divbyzero:
     .set reorder
     li t0, M64K_PENDINGEXC_DIVBYZERO   # set pending exception code to DIVBYZERO
-    sw_m64k t0, M64K_OFF_PENDINGEXC
+    sw_ctx t0, M64K_OFF_PENDINGEXC
 
     srl t0, opcode, 3                  # extract EA mode
     andi t0, 7
@@ -785,41 +785,41 @@ ea_111: # Register-less EAs
 
 ea_000: # Dn
     decode_opsize
-    la_m64k eaptr, M64K_OFF_DREGS+4,t1
+    la_ctx eaptr, M64K_OFF_DREGS+4,t1
     sub eaptr, opsize
     li eaptr32, 0
     jr ra
 ea_001: # An
     decode_opsize
-    la_m64k eaptr, M64K_OFF_AREGS+4,t1
+    la_ctx eaptr, M64K_OFF_AREGS+4,t1
     sub eaptr, opsize
     li eaptr32, 0
     jr ra
 ea_010: # (An)
-    lw_m64k eaptr32, M64K_OFF_AREGS,t1
+    lw_ctx eaptr32, M64K_OFF_AREGS,t1
     map_m68k eaptr, eaptr32
     jr ra
 ea_011: # (An)+
-    lw_m64k eaptr32, M64K_OFF_AREGS,t1
+    lw_ctx eaptr32, M64K_OFF_AREGS,t1
     decode_opsize
     add t0, eaptr32, opsize
     bne t1, 7*4, 1f   # if A7 (stack pointer), align to word
     add t0, 1
     and t0, ~1
-1:  sw_m64k t0, M64K_OFF_AREGS,t1
+1:  sw_ctx t0, M64K_OFF_AREGS,t1
     map_m68k eaptr, eaptr32
     jr ra
 ea_100: # -(An)
-    lw_m64k eaptr32, M64K_OFF_AREGS,t1   # read address register
+    lw_ctx eaptr32, M64K_OFF_AREGS,t1   # read address register
     decode_opsize                        # decode opsize (if wasn't already)
     sub eaptr32, opsize                  # decrement address register
     bne t1, 7*4, 1f                      # if A7 (stack pointer), align to word
     and eaptr32, ~1
-1:  sw_m64k eaptr32, M64K_OFF_AREGS,t1   # write back address register
+1:  sw_ctx eaptr32, M64K_OFF_AREGS,t1   # write back address register
     map_m68k eaptr, eaptr32              # map address to N64 space
     jr ra
 ea_101: # (d16,An)
-    lw_m64k eaptr32, M64K_OFF_AREGS,t1
+    lw_ctx eaptr32, M64K_OFF_AREGS,t1
     lh t0, 0(m_pc)
     addi m_pc, 2
     addu eaptr32, t0
@@ -834,7 +834,7 @@ ea7_011: # (d8,PC,Xn)
     #endif
     j ea_110_inner    
 ea_110: # (d8,An,Xn)
-    lw_m64k eaptr32, M64K_OFF_AREGS,t1   # read An
+    lw_ctx eaptr32, M64K_OFF_AREGS,t1   # read An
 ea_110_inner:
     lbu t1, 0(m_pc)  # read extension word
     lb t0, 1(m_pc)   # read 8-bit displacement
@@ -843,7 +843,7 @@ ea_110_inner:
     srl t0, t1, 2       # calculate pointer to Xn
     andi t0, 0xF << 2
     andi t2, t1, 0x8
-    add t0, m64k
+    add t0, ctx
     lw t1, M64K_OFF_DREGS(t0)
     bnez t2, 1f
     lh t1, M64K_OFF_DREGS+2(t0)
@@ -904,7 +904,7 @@ rmw_table:
 ALIGN(decode_dptr):
     srl dptr, opcode, 7       # get data register pointer
     andi dptr, 0x7 << 2       # isolate data register pointer
-    la_m64k dptr, M64K_OFF_DREGS,dptr
+    la_ctx dptr, M64K_OFF_DREGS,dptr
     jr ra
 
 ALIGN(rmw_easrc):
@@ -998,8 +998,8 @@ OP(addq): OP(subq):
     addi t1, -1         # convert 0 to 8
     andi t1, 0x7
     addi t1, 1
-    sw t1, M64K_OFF_PENDINGEXC+4(m64k)      # store imediate into dummy space
-    la dptr, M64K_OFF_PENDINGEXC+4(m64k)    # set dptr to dummy space
+    sw t1, M64K_OFF_PENDINGEXC+4(ctx)      # store imediate into dummy space
+    la dptr, M64K_OFF_PENDINGEXC+4(ctx)    # set dptr to dummy space
     li opsize, 0            # opsize not calculated yet
     andi result, opcode, 0x7<<3  # isolate EA mode
     xori result, 1<<3            # set 0 if EA mode is An
@@ -1409,7 +1409,7 @@ OP(rol): OP(ror):
 group_shifts:
     srl t0, opcode, 7
     andi t0, 0x7<<2
-    lw_m64k t2, M64K_OFF_DREGS,t0
+    lw_ctx t2, M64K_OFF_DREGS,t0
     andi t2, 63
     j rmw_eadst                  # call RMW (note opsize=0 in OP(shifts))
 
@@ -1635,14 +1635,14 @@ OP(moveq):
     andi flag_zc, opcode, 0xFF
     srl t1, opcode, 7
     andi t1, 0x7 << 2
-    sw_m64k flag_nv, M64K_OFF_DREGS,t1
+    sw_ctx flag_nv, M64K_OFF_DREGS,t1
     j main_loop
 
 OP(movea16):
     lh t1, 0(eaptr)
     srl t0, opcode, 7
     andi t0, 0x7<<2
-    sw_m64k t1, M64K_OFF_AREGS,t0
+    sw_ctx t1, M64K_OFF_AREGS,t0
     j main_loop
 
 OP(movea32):
@@ -1650,7 +1650,7 @@ OP(movea32):
     lwr t1, 3(eaptr)
     srl t0, opcode, 7
     andi t0, 0x7<<2
-    sw_m64k t1, M64K_OFF_AREGS,t0
+    sw_ctx t1, M64K_OFF_AREGS,t0
     j main_loop
 
     #define movem_mask        rmw_bitsize
@@ -1694,7 +1694,7 @@ movem_start:  # Generic implementation (16/32-bit, mem->reg/reg->mem)
     #if MOVEM_4BIT
     li ctz_lut, 0x67646764
     #endif
-    la_m64k reg_ptr, M64K_OFF_DREGS-4       # Initialize pointer to register array (one slot before)
+    la_ctx reg_ptr, M64K_OFF_DREGS-4       # Initialize pointer to register array (one slot before)
     li reg_incr, 4                          # Initialize register pointer increment (4 bytes)
     li reg_incr_3x, 12                      # Initialize 3x register pointer increment (12 bytes)
     andi t0, opcode, 7<<3                   # check if EA is predecrement or postincrement
@@ -1765,15 +1765,15 @@ movem_loop:                              # Main movem loop
 movem_mr_end:
     bltz ea_reg, main_loop                   # If no register writeback is needed, we are done
     addu eaptr32, eaptr, eaptr32_diff        # Calculate the new 32-bit address given the current pointer
-    sw_m64k eaptr32, M64K_OFF_AREGS,ea_reg   # Write back the new address to the address register
+    sw_ctx eaptr32, M64K_OFF_AREGS,ea_reg   # Write back the new address to the address register
     j main_loop
 
 movem_predecr:                               # Predecrement variant
     addu t0, eaptr32, opsize                 # Revert the predecrement in the address register
-    sw_m64k t0, M64K_OFF_AREGS,t1            #  (beheavior specific of M68000)
+    sw_ctx t0, M64K_OFF_AREGS,t1            #  (beheavior specific of M68000)
     subu eaptr32_diff, t0, eaptr             # Calculate the difference between the 32-bit address and the pointer
     neg opsize                               # Negate opsize, so that we can use it to decrement the memory location
-    la_m64k reg_ptr, M64K_OFF_AREGS+8*4      # Initialize pointer to register array (one slot after)
+    la_ctx reg_ptr, M64K_OFF_AREGS+8*4      # Initialize pointer to register array (one slot after)
     neg reg_incr                             # Negate register pointer increment (-4 bytes)
     neg reg_incr_3x                          # Negate 3x register pointer increment (-12 bytes)
     j movem_pre_loop
@@ -1781,7 +1781,7 @@ movem_postincr:                              # Postincrement variant
     check_addr_error eaptr32, read_address_error  # Check if the post-incremented address is valid
     subu eaptr32_diff, eaptr32, eaptr        # Calculate the difference between the 32-bit address and the pointer
     subu t0, eaptr32, opsize                 # Rever the post-increment in the address register
-    sw_m64k t0, M64K_OFF_AREGS,t1            #  (beheavior specific of M68000)
+    sw_ctx t0, M64K_OFF_AREGS,t1            #  (beheavior specific of M68000)
     j movem_loop
 
 
@@ -1829,12 +1829,12 @@ OP(mvccr):
     jal decode_ea
     check_addr_error eaptr32, read_address_error
     jal flush_sr
-    lw_m64k t1, M64K_OFF_SR
+    lw_ctx t1, M64K_OFF_SR
     lhu t0, 0(eaptr)
     and t1, SR_MASK ^ CCR_MASK
     and t0, CCR_MASK
     or t0, t1
-    sw_m64k t0, M64K_OFF_SR
+    sw_ctx t0, M64K_OFF_SR
     jal_and_j reload_sr, main_loop
 
 OP(mvtsr):
@@ -1845,7 +1845,7 @@ OP(mvtsr):
     jal flush_sr
     lhu t0, 0(eaptr)
     and t0, SR_MASK
-    sw_m64k t0, M64K_OFF_SR
+    sw_ctx t0, M64K_OFF_SR
     jal_and_j reload_sr, main_loop
 
 OP(rmw_sr_imm):
@@ -1860,9 +1860,9 @@ rmw_sr_start:
     add m_pc, 2
     jal flush_sr                    # sync SR with current values of flags / stack pointer
     lhu t0, -2(m_pc)                # read immediate value
-    lw_m64k t1, M64K_OFF_SR         # load SR
+    lw_ctx t1, M64K_OFF_SR         # load SR
     jal rmw_op                      # execute operation
-    sw_m64k t0, M64K_OFF_SR         # store modified SR
+    sw_ctx t0, M64K_OFF_SR         # store modified SR
     jal_and_j reload_sr, main_loop  # reload flags / stack pointer
 
 OP(andi_sr):
@@ -1892,7 +1892,7 @@ OP(ext):
     andi dptr, opcode, 7                 # extract dreg index
     sll dptr, 2
     andi t0, opcode, 1<<6                # opcode bit 6: 1=word, 0=byte
-    la_m64k dptr, M64K_OFF_DREGS,dptr    # compute dreg address
+    la_ctx dptr, M64K_OFF_DREGS,dptr    # compute dreg address
     bnez t0, ext_long
 ext_word:
     lb flag_nv, 3(dptr)                  # extend byte to word
@@ -1908,7 +1908,7 @@ ext_long:
 OP(swap):
     andi dptr, opcode, 7                 # extract dreg index
     sll dptr, 2
-    la_m64k dptr, M64K_OFF_DREGS,dptr    # compute dreg address
+    la_ctx dptr, M64K_OFF_DREGS,dptr    # compute dreg address
     lh t0, 0(dptr)
     lh flag_nv, 2(dptr)
     sh t0, 2(dptr)
@@ -1922,12 +1922,12 @@ OP(mvusp):
     sll t1, opcode, 2          # Isolate register offset
     andi t1, 0x7<<2
     bnez t0, mvusp_read        # See if it's read or write
-    lw_m64k t2, M64K_OFF_AREGS,t1
-    sw_m64k t2, M64K_OFF_USP
+    lw_ctx t2, M64K_OFF_AREGS,t1
+    sw_ctx t2, M64K_OFF_USP
     j main_loop
 mvusp_read:
-    lw_m64k t2, M64K_OFF_USP
-    sw_m64k t2, M64K_OFF_AREGS,t1
+    lw_ctx t2, M64K_OFF_USP
+    sw_ctx t2, M64K_OFF_AREGS,t1
     j main_loop
 
 OP(pea):
@@ -1939,7 +1939,7 @@ OP(pea):
     beqz t0, op_nbcd
     li opsize, 2
     jal decode_ea
-    lw_m64k t0, M64K_OFF_AREGS+7*4
+    lw_ctx t0, M64K_OFF_AREGS+7*4
     addiu t0, -4
     check_addr_error t0, write_address_error
     map_m68k t1, t0
@@ -1953,13 +1953,15 @@ OP(lea):
     jal decode_ea
     srl t1, opcode, 7
     andi t1, 0x7<<2
-    sw_m64k eaptr32, M64K_OFF_AREGS,t1
+    sw_ctx eaptr32, M64K_OFF_AREGS,t1
     j main_loop
 
 ALIGN(push32):
-    lw_m64k t1, M64K_OFF_AREGS+7*4
-    addiu t1, -4
-    sw_m64k t1, M64K_OFF_AREGS+7*4
+    li t0, -4
+pushn:
+    lw_ctx t1, M64K_OFF_AREGS+7*4
+    addu t1, t0
+    sw_ctx t1, M64K_OFF_AREGS+7*4
     check_addr_error t1, write_address_error
     map_m68k t0, t1
     jr ra
@@ -1978,19 +1980,19 @@ ALIGN(pop16):
 pop32:
     li t0, 4
 popn:
-    lw_m64k t1, M64K_OFF_AREGS+7*4       # read SP
+    lw_ctx t1, M64K_OFF_AREGS+7*4       # read SP
     check_addr_error t1, read_address_error
     .set noat
     addu $1, t1, t0                      # SP += 2/4
     map_m68k t0, t1
-    sw_m64k $1, M64K_OFF_AREGS+7*4       # write SP
+    sw_ctx $1, M64K_OFF_AREGS+7*4       # write SP
     .set at
     jr ra
 
 OP(link):
     andi t2, opcode, 7                 # extract An from opcode
     sll t2, 2
-    la_m64k t2, M64K_OFF_AREGS,t2      # compute An pointer
+    la_ctx t2, M64K_OFF_AREGS,t2      # compute An pointer
 
     andi t1, opcode, 1<<3
     bnez t1, op_unlk
@@ -2004,12 +2006,12 @@ OP(link):
     lh t2, 0(m_pc)  # read displacement
     addiu m_pc, 2
     addu t1, t2     # SP += disp
-    sw_m64k t1, M64K_OFF_AREGS+7*4
+    sw_ctx t1, M64K_OFF_AREGS+7*4
     j main_loop
 
 OP(unlk):
     lw t1, 0(t2)                         # read An
-    sw_m64k t1, M64K_OFF_AREGS+7*4       # An -> SP
+    sw_ctx t1, M64K_OFF_AREGS+7*4       # An -> SP
     jal pop32
     lwl t3, 0(t0)                        # read (SP)
     lwr t3, 3(t0)                        # read (SP)
@@ -2077,7 +2079,7 @@ OP(dbcc):
     bnez t0, main_loop
     andi t0, opcode, 0x7
     sll t0, 2
-    la_m64k dptr, M64K_OFF_DREGS,t0
+    la_ctx dptr, M64K_OFF_DREGS,t0
     lhu t0, 2(dptr)
     addiu t1, t0, -1
     sh t1, 2(dptr)
@@ -2159,7 +2161,7 @@ cc_gt: # greater than (N == V && Z == 0)
     check_supervisor
     addiu m_cycles, -128
     li t0, M64K_PENDINGEXC_RSTO
-    sw_m64k t0, M64K_OFF_PENDINGEXC     # exit with code M64K_PENDINGEXC_RSTO
+    sw_ctx t0, M64K_OFF_PENDINGEXC     # exit with code M64K_PENDINGEXC_RSTO
     j main_loop_exit
 
 OP(rtr):
@@ -2178,7 +2180,7 @@ rte_exec:
     not rmw_srmask
     and t1, rmw_srmask
     or t0, t1
-    sw_m64k t0, M64K_OFF_SR
+    sw_ctx t0, M64K_OFF_SR
     lwl eaptr32, 2(eaptr)               # read PC from stack
     lwr eaptr32, 5(eaptr)
     jal_and_j reload_sr, jmp_exec       # reload flags/A7 using SR, and then jump to new PC
