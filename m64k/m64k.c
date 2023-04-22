@@ -98,7 +98,7 @@ void m64k_exception_interrupt(m64k_t *m64k, int level)
         m64k->hook_irqack(m64k->hook_irqack_ctx, level);
     } else {
         // Auto-ack the interrupt for simpler cases
-        if (m64k->virq[level]) 
+        if (m64k->virq & (1<<(level-1)))
             m64k_set_virq(m64k, level, false);
         else
             m64k_set_irq(m64k, 0);
@@ -153,7 +153,6 @@ int64_t m64k_run(m64k_t *m64k, int64_t until)
         }
     }
 
-    debugf("SR: %04lx PC: %08lx\n", m64k->sr, m64k->pc);
     return m64k->cycles;
 }
 
@@ -168,18 +167,18 @@ void m64k_set_irq(m64k_t *m64k, int level)
 
 void m64k_set_virq(m64k_t *m64k, int irq, bool on)
 {
-    m64k->virq[irq] = on;
-    if (on) {
-        if (m64k->ipl < irq)
-            m64k_set_irq(m64k, irq);
-    } else {
-        for (int i=7; i>=0; i--) {
-            if (m64k->virq[i]) {
-                m64k_set_irq(m64k, i);
-                break;
-            }
-        }
+    assertf(irq > 0 && irq <= 7, "Invalid IRQ: %d", irq);
+    if (on)
+        m64k->virq |= 1 << (irq-1);
+    else
+        m64k->virq &= ~(1 << (irq-1));
+
+    int i;
+    for (i=7; i>0; i--) {
+        if (m64k->virq & (1 << (i-1)))
+            break;
     }
+    m64k_set_irq(m64k, i);
 }
 
 uint32_t m64k_get_pc(m64k_t *m64k)

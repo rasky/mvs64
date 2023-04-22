@@ -22,7 +22,7 @@ typedef struct {
     uint8_t nmi_pending;
     uint8_t check_interrupts;
 
-    bool virq[8];
+    uint8_t virq;
     int (*hook_irqack)(void *ctx, int level);
     void *hook_irqack_ctx;
 } m64k_t;
