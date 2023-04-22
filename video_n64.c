@@ -15,7 +15,7 @@ static int pal_slot_cache[16];
 static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int sh, bool flipx, bool flipy) {
 	static const int16_t scale_fx[17] = { 0, (16<<10)/1, (16<<10)/2, (16<<10)/3, (16<<10)/4, (16<<10)/5, (16<<10)/6, (16<<10)/7, (16<<10)/8, (16<<10)/9, (16<<10)/10, (16<<10)/11, (16<<10)/12, (16<<10)/13, (16<<10)/14, (16<<10)/15, (16<<10)/16 };
 	uint8_t *src = crom_get_sprite(spritenum);
-	uint16_t *pal = PALETTE_RAM + PALETTE_RAM_BANK + palnum*16;
+	uint16_t *pal = PALETTE_RAM_EMU + palnum*16;
 
 	// Convert the coordinates from [0..511] to [-16..496]
 	if (x0 >= 512-16) x0 = x0-512;
@@ -116,6 +116,9 @@ static void rsp_fix_draw(uint8_t *src, int palnum, int x, int y) {
 	rspq_write(RSP_OVL_ID, 0x1, PhysicalAddr(src), 
 		(palnum << 20) | (x << 10) | y);
 }
+static void rsp_pal_convert(uint16_t *src, uint16_t *dst) {
+	rspq_write(RSP_OVL_ID, 0x3, PhysicalAddr(src), PhysicalAddr(dst));
+}
 
 #define FIX_TMEM_ADDR 	0
 #define FIX_TMEM_PITCH  8
@@ -162,8 +165,7 @@ static void render_begin_fix(void) {
 
 	// Load all 16 palettes right away. They fit TMEM, so that we don't need
 	// to load them while we process
-	data_cache_hit_writeback_invalidate(PALETTE_RAM + PALETTE_RAM_BANK, 16*16*2);
-	rdpq_tex_load_tlut(PALETTE_RAM + PALETTE_RAM_BANK, 0, 256);
+	rdpq_tex_load_tlut(PALETTE_RAM_EMU, 0, 256);
 
 	// Configure tiles once
 	rdpq_set_tile(TILE0, FMT_CI4, FIX_TMEM_ADDR, FIX_TMEM_PITCH, 0);  // used for drawing
@@ -180,10 +182,18 @@ static void render_begin_fix(void) {
 static void render_end_fix(void) {}
 
 static void render_begin(void) {
+	data_cache_hit_writeback(PALETTE_RAM + PALETTE_RAM_BANK, 4096*2);
+	for (int i=0; i<4096 / 0x400; i++) {
+		rsp_pal_convert(PALETTE_RAM + PALETTE_RAM_BANK + i*0x400, PALETTE_RAM_EMU + i*0x400);
+	}
+
+	uint16_t bkg = color_convert(PALETTE_RAM[PALETTE_RAM_BANK+0xFFF]) | 1;
+
 	// Clear the screen
 	// rdpq_debug_log(true);
-	rdpq_set_mode_fill(color_from_packed16(PALETTE_RAM[PALETTE_RAM_BANK + 0xFFF]));
+	rdpq_set_mode_fill(color_from_packed16(bkg));
 	rdpq_fill_rectangle(0, 0, 320, 240);
+	rspq_flush();
 }
 
 static void render_end(void) {

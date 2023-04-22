@@ -36,6 +36,18 @@ static inline bool vshrink_line_drawn(int height, int y) {
 	return height > VSHRINK_MAGIC[y];
 }
 
+static uint16_t color_convert(uint16_t val) {
+	uint16_t c16 = 0;
+
+	c16 |= ((val & 0x0F00) << 4) | ((val & 0x4000) >> 3);
+	c16 |= ((val & 0x00F0) << 3) | ((val & 0x2000) >> 7);
+	c16 |= ((val & 0x000F) << 2) | ((val & 0x1000) >> 11);
+
+	return c16;
+}
+
+static uint16_t PALETTE_RAM_EMU[4*1024];
+
 #ifdef N64
 	#if 1
 	#include "video_n64.c"
@@ -45,8 +57,6 @@ static inline bool vshrink_line_drawn(int height, int y) {
 #else
 #include "video_cpu.c"
 #endif
-
-static uint8_t PALETTE_DARK_BITS[8*1024/8];
 
 static void render_fix(void) {
 	uint16_t *fix = VIDEO_RAM + 0x7000;
@@ -210,22 +220,7 @@ void video_palette_w(uint32_t address, uint32_t val, int sz) {
 	address &= 0x1FFF;
 	address /= 2;
 	address += PALETTE_RAM_BANK;
-
-	uint16_t c16 = 0;
-
-	c16 |= ((val & 0x0F00) << 4) | ((val & 0x4000) >> 3);
-	c16 |= ((val & 0x00F0) << 3) | ((val & 0x2000) >> 7);
-	c16 |= ((val & 0x000F) << 2) | ((val & 0x1000) >> 11);
-
-	// All colors but index 0 of each palette have alpha set to 1.
-	if (address & 15) c16 |= 1;
-
-	// Store dark bit in a parallel data structure. This is required in case
-	// the game reads back the pallette RAM, to reconstruct the correct color.
-	PALETTE_DARK_BITS[address/8] &= ~(1 << (address%8));
-	PALETTE_DARK_BITS[address/8] |= (val>>15) << (address%8);
-
-	PALETTE_RAM[address] = c16;
+	PALETTE_RAM[address] = val;
 }
 
 uint32_t video_palette_r(uint32_t address, int sz) {
@@ -236,15 +231,5 @@ uint32_t video_palette_r(uint32_t address, int sz) {
 	address &= 0x1FFF;
 	address /= 2;
 	address += PALETTE_RAM_BANK;
-
-	uint16_t c16 = PALETTE_RAM[address];
-
-	uint16_t val = 0;
-
-	val |= ((c16 >> 4) & 0x0F00) | ((c16 << 3) & 0x4000);
-	val |= ((c16 >> 3) & 0x00F0) | ((c16 << 7) & 0x2000);
-	val |= ((c16 >> 2) & 0x000F) | ((c16 << 11) & 0x1000);
-	val |= (PALETTE_DARK_BITS[address/8] >> (address%8)) << 15;
-
-	return val;
+	return PALETTE_RAM[address];
 }

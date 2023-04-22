@@ -6,7 +6,7 @@ static void draw_sprite_fix(int spritenum, int palnum, int x, int y) {
 	const int w=8, h=8;
 	uint16_t *dst = (uint16_t*)g_screen_ptr + y*g_screen_pitch/2 + x;
 	uint8_t *src = srom_get_sprite(spritenum);
-	uint16_t *pal = PALETTE_RAM + PALETTE_RAM_BANK + palnum*16;
+	uint16_t *pal = PALETTE_RAM_EMU + palnum*16;
 
 	for (int j=0;j<h;j++) {
 		uint16_t *l = dst;
@@ -37,7 +37,7 @@ static void render_end_sprites(void) {}
 static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int sh, bool flipx, bool flipy) {
 	const int w = 16, h = 16; 
 	uint8_t *src = crom_get_sprite(spritenum);
-	uint16_t *pal = PALETTE_RAM + PALETTE_RAM_BANK + palnum*16;
+	uint16_t *pal = PALETTE_RAM_EMU + palnum*16;
 
 	int src_y_inc = w/2, src_x_inc = 1, src_bpp_flip=0;
 	if (flipy) {
@@ -77,10 +77,20 @@ static void render_begin_fix(void) {}
 static void render_end_fix(void) {}
 
 static void render_begin(void) {
+	for (int i=0; i<4096; i++) {
+		uint16_t val = PALETTE_RAM[PALETTE_RAM_BANK + i];
+		uint16_t c16 = color_convert(val);
+
+		// All colors but index 0 of each palette have alpha set to 1.
+		if (i & 15) c16 |= 1;
+
+		PALETTE_RAM_EMU[i] = c16;
+	}
+
 	uint16_t *screen = (uint16_t*)g_screen_ptr;
 	for (int y=0;y<224;y++)
 		for (int x=0;x<320;x++)
-			screen[y*g_screen_pitch/2 + x] = PALETTE_RAM[PALETTE_RAM_BANK+0xFFF];
+			screen[y*g_screen_pitch/2 + x] = PALETTE_RAM_EMU[0xFFF];
 }
 
 static void render_end(void) {}
