@@ -2,8 +2,30 @@
 #include <libdragon.h>
 
 #define RSP_FIX_LAYER    1
+#define RSP_SPRITES      1
 
 extern uint32_t RSP_OVL_ID;
+
+static void rsp_fix_init(void) {
+	rspq_write(RSP_OVL_ID, 0x0);
+}
+static void rsp_fix_draw(uint8_t *src, int palnum, int x, int y) {
+	rspq_write(RSP_OVL_ID, 0x1, PhysicalAddr(src), 
+		(palnum << 20) | (x << 10) | y);
+}
+static void rsp_sprite_draw(uint8_t *src, int palnum, int x0, int y0, int sw, int sh, bool flipx, bool flipy) {
+	assertf(sw <= 16 && sh <= 16, "sprite too large: %dx%d", sw, sh);
+	assertf(sw > 0 && sh > 0, "sprite too small: %dx%d", sw, sh);
+	rspq_write(RSP_OVL_ID, 0x2, PhysicalAddr(src), 
+		(palnum << 20) | (x0 << 10) | y0,
+		(sw-1) | ((sh-1) << 4) | (flipx ? 0x100 : 0) | (flipy ? 0x200 : 0));
+}
+static void rsp_pal_convert(uint16_t *src, uint16_t *dst) {
+	rspq_write(RSP_OVL_ID, 0x3, PhysicalAddr(src), PhysicalAddr(dst));
+}
+static void rsp_sprite_begin(uint16_t *palette_ram) {
+	rspq_write(RSP_OVL_ID, 0x4, PhysicalAddr(palette_ram));
+}
 
 static bool rdp_mode_copy = false;
 static int rdp_tex_slot = 0;
@@ -13,9 +35,15 @@ static int fix_last_palnum = -1;
 static int pal_slot_cache[16];
 
 static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int sh, bool flipx, bool flipy) {
-	static const int16_t scale_fx[17] = { 0, (16<<10)/1, (16<<10)/2, (16<<10)/3, (16<<10)/4, (16<<10)/5, (16<<10)/6, (16<<10)/7, (16<<10)/8, (16<<10)/9, (16<<10)/10, (16<<10)/11, (16<<10)/12, (16<<10)/13, (16<<10)/14, (16<<10)/15, (16<<10)/16 };
 	uint8_t *src = crom_get_sprite(spritenum);
+
+	if (RSP_SPRITES) {
+		rsp_sprite_draw(src, palnum, x0, y0, sw, sh, flipx, flipy);
+		return;
+	}
+
 	uint16_t *pal = PALETTE_RAM_EMU + palnum*16;
+	static const int16_t scale_fx[17] = { 0, (16<<10)/1, (16<<10)/2, (16<<10)/3, (16<<10)/4, (16<<10)/5, (16<<10)/6, (16<<10)/7, (16<<10)/8, (16<<10)/9, (16<<10)/10, (16<<10)/11, (16<<10)/12, (16<<10)/13, (16<<10)/14, (16<<10)/15, (16<<10)/16 };
 
 	// Convert the coordinates from [0..511] to [-16..496]
 	if (x0 >= 512-16) x0 = x0-512;
@@ -99,6 +127,18 @@ static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int s
 }
 
 static void render_begin_sprites(void) {
+	if (RSP_SPRITES) {
+		// rdpq_debug_log(true);
+		rdpq_debug_log_msg("render_begin_sprites");
+		rsp_sprite_begin(PALETTE_RAM_EMU);
+		rdpq_mode_begin();
+			rdpq_set_mode_standard();
+			rdpq_mode_tlut(TLUT_RGBA16);
+			rdpq_mode_alphacompare(1);
+		rdpq_mode_end();
+		return;
+	}
+
 	rdpq_set_mode_copy(true);
 	rdpq_mode_tlut(TLUT_RGBA16);
 
@@ -107,17 +147,10 @@ static void render_begin_sprites(void) {
 	for (int i=0;i<16;i++) pal_slot_cache[i] = -1;
 }
 
-static void render_end_sprites(void) {}
-
-static void rsp_fix_init(void) {
-	rspq_write(RSP_OVL_ID, 0x0);
-}
-static void rsp_fix_draw(uint8_t *src, int palnum, int x, int y) {
-	rspq_write(RSP_OVL_ID, 0x1, PhysicalAddr(src), 
-		(palnum << 20) | (x << 10) | y);
-}
-static void rsp_pal_convert(uint16_t *src, uint16_t *dst) {
-	rspq_write(RSP_OVL_ID, 0x3, PhysicalAddr(src), PhysicalAddr(dst));
+static void render_end_sprites(void) {
+	if (RSP_SPRITES) {
+		// rdpq_debug_log(false);
+	}
 }
 
 #define FIX_TMEM_ADDR 	0
@@ -160,6 +193,8 @@ static void draw_sprite_fix(int spritenum, int palnum, int x, int y) {
 }
 
 static void render_begin_fix(void) {
+	rdpq_sync_pipe();
+	rdpq_sync_tile();
 	rdpq_set_mode_copy(true);
 	rdpq_mode_tlut(TLUT_RGBA16);
 
