@@ -222,8 +222,12 @@ int main()
 	}
 #else
     static const char *testfns[] = {
-        "rom:/TRAP.btest",
-
+        "rom:/ROXL.b.btest",
+        "rom:/ROXL.l.btest",
+        "rom:/ROXL.w.btest",
+        "rom:/ROXR.b.btest",
+        "rom:/ROXR.l.btest",
+        "rom:/ROXR.w.btest",
         "rom:/ROL.b.btest",
         "rom:/ROL.l.btest",
         "rom:/ROL.w.btest",
@@ -231,6 +235,20 @@ int main()
         "rom:/ROR.l.btest",
         "rom:/ROR.w.btest",
 
+        "rom:/ASL.b.btest",
+        "rom:/ASL.l.btest",
+        "rom:/ASL.w.btest",
+        "rom:/ASR.b.btest",   // these seem too buggy
+        "rom:/ASR.l.btest",   // these seem too buggy
+        "rom:/ASR.w.btest",   // these seem too buggy
+        "rom:/LSR.b.btest",
+        "rom:/LSR.l.btest",
+        "rom:/LSR.w.btest",
+        "rom:/LSL.b.btest",
+        "rom:/LSL.l.btest",
+        "rom:/LSL.w.btest",
+
+        "rom:/TRAP.btest",
         "rom:/EXG.btest",
 
         "rom:/BTST.btest",

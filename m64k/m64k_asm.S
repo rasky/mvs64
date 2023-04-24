@@ -1364,6 +1364,11 @@ op_negx_rmwimpl:
     j op_subx_rmwimpl
 
 
+OP(roxli): OP(roxri):
+    andi opcode, 0xFFFF^(7<<3)   # turn off ir so that EA is Dn
+    lax t1, op_roxl_rmwimpl
+    lax t2, op_roxr_rmwimpl
+    j op_shift_imm
 OP(roli): OP(rori):
     andi opcode, 0xFFFF^(7<<3)   # turn off ir so that EA is Dn
     lax t1, op_rol_rmwimpl
@@ -1387,7 +1392,7 @@ asli_start:
     addi t2, -1          # if value is 0, it means 8
     andi t2, 7
     addi t2, 1
-    j rmw_eadst          # call RMW (note opsize=0 in OP(shifts)
+    j rmw_eadst          # call RMW (note opsize=0 in OP(shifts)).
 
 OP(lsl): OP(lsr):
     andi t0, opcode, 1<<8
@@ -1410,23 +1415,29 @@ OP(rol): OP(ror):
     bnez t0, group_shifts
     lax rmw_op, op_ror_rmwimpl
     j group_shifts
+OP(roxl): OP(roxr):
+    andi t0, opcode, 1<<8
+    andi opcode, 0xFFFF^(7<<3)   # turn off ir so that EA is Dn
+    lax rmw_op, op_roxl_rmwimpl
+    bnez t0, group_shifts
+    lax rmw_op, op_roxr_rmwimpl
+    j group_shifts
 
 group_shifts:
-    srl t0, opcode, 7
-    andi t0, 0x7<<2
-    lw_ctx t2, M64K_OFF_DREGS,t0
-    andi t2, 63
+    srl t0, opcode, 7            # read source Dn register into t2; similar to decode_dptr,
+    andi t0, 0x7<<2              #  but we use t2 instead so that we can reuse the impl
+    lw_ctx t2, M64K_OFF_DREGS,t0 #  functions used by immediate shifts.
+    andi t2, 63                  # mask the shift amount
     j rmw_eadst                  # call RMW (note opsize=0 in OP(shifts))
 
-
-OP(lsl_rmwimpl):
+OP(lsl_rmwimpl): # t1=register, t2=shift amount
     dsllv result, t1, t2                # calculate extended result
     dsllv flag_zc, result, rmw_bitsize  # affect Z and C flags
     sllv flag_nv, result, rmw_bitsize   # affect N flag and reset V flag
     beqz t2, 1f                         # affect X flag only if shift amount is 0
     dsrl flag_x, flag_zc, 32
 1:  jr ra
-OP(lsr_rmwimpl):
+OP(lsr_rmwimpl): # t1=register, t2=shift amount
     dsrlv result, t1, t2                # do the right shift into result
     addi t0, t2, -1                     # reduce shift amount
     dsrlv flag_zc, t1, t0               # shift one less (last bit = carry)
@@ -1436,7 +1447,7 @@ OP(lsr_rmwimpl):
     beqz t2, 1f                         # affect X flag only if shift amount is 0
     dsrl flag_x, flag_zc, 32
 1:  jr ra
-OP(asl_rmwimpl):    
+OP(asl_rmwimpl): # t1=register, t2=shift amount
     dsllv result, t1, t2                # calculate extended result
     dsllv flag_zc, result, rmw_bitsize  # affect Z and C flags
     sllv flag_nv, result, rmw_bitsize   # affect N flag and reset V flag
@@ -1448,7 +1459,7 @@ OP(asl_rmwimpl):
     beqz t2, 1f                         # affect X flag only if shift amount is 0
     dsrl flag_x, flag_zc, 32
 1:  jr ra
-OP(asr_rmwimpl):
+OP(asr_rmwimpl): # t1=register, t2=shift amount
     sllv flag_nv, t1, rmw_bitsize       # set N flag to sign of input, reset V flag
     dsll result, flag_nv, 32            # align input to the upper bits
     dsrav result, result, t2            # arithmetic shift right
@@ -1460,7 +1471,7 @@ OP(asr_rmwimpl):
     beqz t2, 1f                         # affect X flag only if shift amount is 0
     dsrl flag_x, flag_zc, 32
 1:  jr ra
-OP(rol_rmwimpl):
+OP(rol_rmwimpl): # t1=register, t2=shift amount
     sll t3, opsize, 3                   # calculate bitsize in bits (8, 16, 32)
     addi t0, t3, -1                     # calculate bytessize mask (7, 15, 31)
     neg result, t2
@@ -1474,7 +1485,7 @@ OP(rol_rmwimpl):
     bnez t2, 1f                         # clear C flag if shift amount is 0
     zx64 flag_zc
 1:  jr ra
-OP(ror_rmwimpl):
+OP(ror_rmwimpl): # t1=register, t2=shift amount
     sll t3, opsize, 3                   # calculate bitsize in bits (8, 16, 32)
     addi result, t3, -1                 # calculate bytessize mask (7, 15, 31)
     and t0, t2, result
@@ -1488,7 +1499,34 @@ OP(ror_rmwimpl):
     zx64 flag_zc
 1:  jr ra
 
-
+OP(roxr_rmwimpl): # t1=register, t2=shift amount
+    andi opcode, 0xFFFF^(1<<8)          # clear direction bit again (it was turned on in rmw_eadst) 
+OP(roxl_rmwimpl): # t1=register, t2=rotate amount
+    andi flag_x, 1
+    dsll t0, flag_x, 32                 # move input carry (from X) to bit 32
+    dsll t1, rmw_bitsize                # left-align input register to bit 31
+    or t1, t0                           # combine with input carry
+    srl t3, opsize, 1
+    add t3, 3                           # t3 = 3,4,5 for b,w,l. Next lines explain the byte case.
+    xori opsize, rmw_bitsize, 31        # bitsize = 7,15,31 for b,w,l
+    srlv t0, t2, t3                     # t0 = ra>>3 = ra/8
+    and t2, opsize                      # t2 = ra&7 = ra%8
+    sub t2, t0                          # ra%8 - ra/8 = ra%9 (though with negative remainders)
+    andi result, opcode, 1<<8           # check rotate direction
+    bnez result, 1f                     # if roxr, negate t2
+    neg t2
+1:  addi opsize, 2                      # opsize = 9,17,31 for b,w,l
+    bgtz t2, 1f                         # adjust remainder if negative or zero
+    add t2, opsize                      # t2 = 1..9 = shift-left amount 
+1:  sub t3, opsize, t2                  # t3 = 8..0 = shift-right amount
+    dsllv t0, t1, t2                    # shift left
+    dsrlv t1, t1, t3                    # shift right
+    or result, t0, t1                   # combine
+    dsrlv result, result, rmw_bitsize   # shift back result into correct place
+    dsllv flag_zc, result, rmw_bitsize  # affect Z and C flags
+    sllv flag_nv, result, rmw_bitsize   # affect N flag and reset V flag
+    dsrl flag_x, flag_zc, 32
+    jr ra
 
 OP(aslm): OP(asrm):
     jal decode_ea                       # decode EA (note opsize=2 in OP(bits))
@@ -1537,8 +1575,8 @@ OP(rolm): OP(rorm):
     check_addr_error eaptr32, read_address_error
     andi t1, opcode, 0x100
     lhu t0, 0(eaptr)
-    bnez t1, op_rol_ea_left
-op_rol_ea_right:
+    bnez t1, op_rom_ea_left
+op_rom_ea_right:
     srl result, t0, 1
     sll t0, 15
     or result, t0
@@ -1546,13 +1584,37 @@ op_rol_ea_right:
     move flag_zc, flag_nv
     sh result, 0(eaptr)
     j main_loop
-op_rol_ea_left:
+op_rom_ea_left:
     sll result, t0, 1
     srl t0, 15
     or result, t0
     sll flag_nv, result, 16
     dsll flag_zc, result, 16
     sh result, 0(eaptr)
+    j main_loop
+
+OP(roxlm): OP(roxrm):
+    jal decode_ea                       # decode EA (note opsize=2 in OP(bits))
+    check_addr_error eaptr32, read_address_error
+    andi t1, opcode, 0x100        # check rotate direction
+    lhu t0, 0(eaptr)              # fetch memory operand
+    andi flag_x, 1                # isolate input carry bit
+    bnez t1, op_roxm_ea_left
+op_roxm_ea_right:
+    srl result, t0, 1
+    sll flag_x, 15
+    andi t0, 1
+    sll t0, 16
+    or result, t0
+    j op_roxm_finish
+op_roxm_ea_left:
+    sll result, t0, 1             # shift left, new carry in bit 16
+op_roxm_finish:
+    or result, flag_x             # merge input carry
+    sll flag_nv, result, 16       # set N flag, and clear V flag
+    dsll flag_zc, result, 16      # set Z and C flags
+    dsrl flag_x, flag_zc, 32      # set X flag as a copy of C
+    sh result, 0(eaptr)           # store result
     j main_loop
 
 OP(clr):
@@ -2277,7 +2339,6 @@ op_exg_start:
 op_unk:
 # 68000+ instructions
 op_nbcd: op_trapv: op_stop:
-op_roxl: op_roxm: op_roxli: op_roxlm: op_roxrm:
 # 68010+ instructions
 op_movec: op_bkpt: op_mvfccr: op_moves: op_rtd:
 # 68020+ instructions
