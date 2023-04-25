@@ -1065,9 +1065,17 @@ op_sub_rmwimpl_flags:
     dsubu flag_nv, t1, t0
     jr ra
 
+OP(nbcd):
+    li opsize, 1
+    lax rmw_op, op_nbcd_rmwimpl
+    j rmw_eadst
 OP(abcd):
     li opsize, 1
     lax rmw_op, op_abcd_rmwimpl
+    j op_addx_start
+op_sbcd:
+    li opsize, 1
+    lax rmw_op, op_sbcd_rmwimpl
     j op_addx_start
 op_subx: # opsize already set to 0 by caller
     lax rmw_op, op_subx_rmwimpl
@@ -1146,6 +1154,35 @@ OP(abcd_rmwimpl):
     dsll t0, flag_x, 32
     or flag_zc, t0                       # C combines both the intermediate and the final carry
     jr ra
+OP(nbcd_rmwimpl):
+    move t0, t1
+    li t1, 0
+op_sbcd_rmwimpl:
+    # Calculate uncorrected result
+    andi flag_x, 1
+    subu result, t1, t0
+    subu result, flag_x
+    # Get borrows from the subtraction
+    xor t0, t1
+    xor t0, result
+    # Calculate corf, then align to top of 32-bit
+    andi t0, 0x110
+    srl flag_x, t0, 8  # Also set X flag to the borrow
+    srl t1, t0, 2
+    subu t0, t1
+    sll t0, 23
+    # Subtract corf and set sign/overflow
+    sll flag_nv, result, 24
+    sltu t1, flag_nv, t0 # Also update X flag on subtraction borrow
+    or flag_x, t1
+    dsubu flag_nv, t0
+    srl result, flag_nv, 24
+    # Accumulate zero and set carry
+    zx64 flag_zc
+    or flag_zc, result
+    dsll t0, flag_x, 32
+    or flag_zc, t0
+    jr ra    
 
 OP(suba):
     li result, 1
@@ -1322,8 +1359,21 @@ op_and_rmwimpl:
     jr ra
 
 OP(or):
-    andi t0, opcode, 3<<6
-    beq t0, 3<<6, op_div
+    .set noat
+    .set noreorder
+    and t0, opcode, 3<<6
+    li $1, 3<<6
+    beq t0, $1, op_div
+     andi t0, opcode, 0b11111<<4
+    li $1, 0b10000<<4
+    beq t0, $1, op_sbcd
+     li $1, 0b10100<<4
+    beq t0, $1, op_pack
+     li $1, 0b11000<<4
+    beq t0, $1, op_unpk
+     nop
+    .set at
+    .set reorder
     lax rmw_op, op_or_rmwimpl
     j op_group_logical
 op_or_rmwimpl:
@@ -1633,9 +1683,8 @@ op_roxm_finish:
     j main_loop
 
 OP(clr):
-    ori opcode, 1<<8
     lax rmw_op, op_clr_rmwimpl
-    j rmw
+    j rmw_eadst
 op_clr_rmwimpl:
     li result, 0
     li flag_nv, 0
@@ -2023,10 +2072,10 @@ mvusp_read:
 OP(pea):
     andi t0, opcode, 1<<7
     bnez t0, op_movem_rm
-    andi t0, opcode, 0b111000
-    beqz t0, op_swap
     andi t0, opcode, 1<<6
     beqz t0, op_nbcd
+    andi t0, opcode, 0b111000
+    beqz t0, op_swap
     li opsize, 2
     jal decode_ea
     lw_ctx t0, M64K_OFF_AREGS+7*4
@@ -2363,7 +2412,7 @@ op_exg_start:
 
 op_unk:
 # 68000+ instructions
-op_nbcd: op_trapv: op_stop:
+op_trapv: op_stop:
 # 68010+ instructions
 op_movec: op_bkpt: op_mvfccr: op_moves: op_rtd:
 # 68020+ instructions
