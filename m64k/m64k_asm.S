@@ -831,12 +831,8 @@ ea_101: # (d16,An)
     map_m68k eaptr, eaptr32
     jr ra
 ea7_011: # (d8,PC,Xn)
-    #if M64K_CONFIG_ADDRERR
     lw t0, pc_diff
-    addu eaptr32, m_pc, t0    # Compute exact eaptr32 in case it's pushed on the stack for the exception
-    #else
-    move eaptr32, m_pc
-    #endif
+    addu eaptr32, m_pc, t0    # Compute exact eaptr32 (in case it's read via LEA/PEA)
     j ea_110_inner    
 ea_110: # (d8,An,Xn)
     lw_ctx eaptr32, M64K_OFF_AREGS,t1   # read An
@@ -867,14 +863,11 @@ ea7_001: # (xxx).L
     map_m68k eaptr, eaptr32
     jr ra
 ea7_010: # (d16,PC)
-    move eaptr32, m_pc   # FIXME! this should use the update 32-bit PC!
+    lw t0, pc_diff
+    addu eaptr32, m_pc, t0    # Compute exact eaptr32 (in case it's read via LEA/PEA)
     lh t0, 0(m_pc)
     addi m_pc, 2
     add eaptr32, t0
-    #if M64K_CONFIG_ADDRERR
-    lw t1, pc_diff
-    addu eaptr32, t1   # Compute exact eaptr32 in case it's pushed on the stack for the exception
-    #endif
     map_m68k eaptr, eaptr32
     jr ra
 ea7_100: # #<data>
