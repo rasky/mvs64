@@ -1685,9 +1685,17 @@ OP(movel):
     andi t1, 7
     jal decode_ea_customreg
     check_addr_error eaptr32, write_address_error
-    swl flag_nv, 0(eaptr)
-    swr flag_nv, 3(eaptr)
+    andi t0, opcode, 7<<3           # isolate EA-destination mode
+    xori t0, 4<<3                   # check if it's pre-decrement mode
+    move result, flag_nv
+    beqz t0, 1f                     # if so, write memory in reversed order
+    .set noreorder
+    swl result, 0(eaptr)            # standard order: SWL+SWR
     j main_loop
+1:  swr result, 3(eaptr)            # reversed order: SWR+SWL
+    j main_loop
+    swl result, 0(eaptr)
+    .set reorder
 
 OP(moveq):
     sll flag_nv, opcode, 24
