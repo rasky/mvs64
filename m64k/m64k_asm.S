@@ -2012,7 +2012,7 @@ OP(pea):
     map_m68k t1, t0
     swl eaptr32, 0(t1)
     swr eaptr32, 3(t1)
-    sw_m64k t0, M64K_OFF_AREGS+7*4
+    sw_ctx t0, M64K_OFF_AREGS+7*4
     j main_loop
 
 OP(lea):
