@@ -1065,10 +1065,14 @@ op_sub_rmwimpl_flags:
     dsubu flag_nv, t1, t0
     jr ra
 
-OP(subx):
+OP(abcd):
+    li opsize, 1
+    lax rmw_op, op_abcd_rmwimpl
+    j op_addx_start
+op_subx: # opsize already set to 0 by caller
     lax rmw_op, op_subx_rmwimpl
     j op_addx_start
-OP(addx):
+op_addx: # opsize already set to 0 by caller
     lax rmw_op, op_addx_rmwimpl
 op_addx_start:
     andi t0, opcode, 0x8         # isolate R/M bit
@@ -1120,11 +1124,33 @@ OP(subx_rmwimpl):
     dsubu flag_nv, flag_x
     dsrl flag_x, flag_zc, 32             # copy new carry bit into flag_x
     jr ra
+OP(abcd_rmwimpl):
+    andi flag_x, 1                       # isolate X flag
+    addu result, t0, t1
+    addu result, flag_x                  # calculate t0+t1+X (uncorrected result)
+    xor t0, t1
+    xor t0, result                       # get carries from addition (both 8-bit and 4-bit)
+    addiu t1, result, 0x66
+    xor t1, result                       # get carries from adding 0x66
+    or t0, t1                            # combine carries
+    andi t0, 0x110                       # isolate carries
+    srl flag_x, t0, 8                    # set X flag to the combined 8-bit carry
+    srl t1, t0, 2
+    subu t0, t1                          # calculate corf
+    sll t0, 23                           # align corf to top 32-bit
+    sll flag_nv, result, 24              # align result to top 32-bit
+    daddu flag_nv, t0                    # add corf and affact N/V
+    srl result, flag_nv, 24              # shift result back to 24-bit
+    zx64 flag_zc                         # clear C
+    or flag_zc, result                   # accumulate Z and set C
+    dsll t0, flag_x, 32
+    or flag_zc, t0                       # C combines both the intermediate and the final carry
+    jr ra
 
 OP(suba):
     li result, 1
     j op_adda_start
-OP(adda):
+op_adda:
     li result, 0
 op_adda_start:
     addi dptr, 32                   # Point to AREG instead of DREG
@@ -1150,9 +1176,6 @@ op_adda32_rmwimpl:
     jr ra
 
 OP(cmp):
-    // CMP: 000, 001, 010
-    // CMPA: 011, 111
-    // EOR: 100, 101, 110
     andi t0, opcode, 0b111 << 6
     beq t0, 0b011 << 6, op_cmpa16
     beq t0, 0b111 << 6, op_cmpa32
@@ -1596,7 +1619,6 @@ OP(roxlm): OP(roxrm):
 op_roxm_ea_right:
     srl result, t0, 1
     sll flag_x, 15
-    andi t0, 1
     sll t0, 16
     or result, t0
     j op_roxm_finish
@@ -2225,7 +2247,7 @@ cc_gt: # greater than (N == V && Z == 0)
     xor t0, t2
     jr ra
 
- OP(reset):
+OP(reset):
     check_supervisor
     addiu m_cycles, -128
     li t0, M64K_PENDINGEXC_RSTO
@@ -2323,6 +2345,8 @@ bittable:
     #undef bitmask
 
 OP(exg):
+    andi t0, opcode, 3<<6
+    beqz t0, op_abcd
     jal decode_dptr
     li opsize, 4
     jal decode_ea
