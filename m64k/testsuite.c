@@ -222,6 +222,9 @@ int main()
 	}
 #else
     static const char *testfns[] = {
+        "rom:/TRAPV.btest",
+        "rom:/TAS.btest",
+
         "rom:/ABCD.btest",
         "rom:/SBCD.btest",
         "rom:/NBCD.btest",
