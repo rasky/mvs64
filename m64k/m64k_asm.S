@@ -1692,13 +1692,14 @@ op_clr_rmwimpl:
     jr ra
 
 OP(tst):
+    srl rmw_bitsize, opcode, 6
+    andi rmw_bitsize, 3
+    beq rmw_bitsize, 3, op_tas
     jal decode_ea
-    srl t0, opcode, 6
-    andi t0, 3
-    beqz t0, tst_byte
+    beqz rmw_bitsize, tst_byte
     check_addr_error eaptr32, read_address_error
-    addi t0, -1
-    beqz t0, tst_word
+    addi rmw_bitsize, -1
+    beqz rmw_bitsize, tst_word
 tst_long:
     lwl flag_zc, 0(eaptr)
     lwr flag_zc, 3(eaptr)
@@ -2088,6 +2089,8 @@ OP(pea):
     j main_loop
 
 OP(lea):
+    andi t0, opcode, 1<<6
+    beqz t0, op_chk
     li opsize, 2
     jal decode_ea
     srl t1, opcode, 7
@@ -2325,7 +2328,10 @@ rte_exec:
     jal_and_j reload_sr, jmp_exec       # reload flags/A7 using SR, and then jump to new PC
 
 OP(trap):
-    jal flush_stack
+    andi eaptr32, opcode, 0xF
+    addi eaptr32, 32
+trap:
+    jal flush_sr
     ori t1, SR_SUPERV
     sw_ctx t1, M64K_OFF_SR
     jal reload_stack
@@ -2340,8 +2346,6 @@ OP(trap):
     lw_ctx result, M64K_OFF_SR
     sh result, 0(t0)
 
-    andi eaptr32, opcode, 0xF
-    addi eaptr32, 32
     lw_ctx t1, M64K_OFF_VBR
     sll eaptr32, 2
     addu eaptr32, t1
@@ -2350,6 +2354,12 @@ OP(trap):
     lw eaptr32, 0(eaptr)
     j jmp_exec
 
+OP(trapv):
+    li t2, 0
+    jal cc_vc
+    bnez t0, main_loop
+    li eaptr32, 7
+    j trap
 
     #define bitidx_mask     result
 OP(bitsr):  # bit operation using a register as index
@@ -2409,10 +2419,23 @@ op_exg_start:
     sw t3, (dptr)
     j main_loop
 
+OP(tas):
+    li opsize, 1                       # TAS is always 8-bit
+    lax rmw_op, op_tas_rmwimpl
+    jal_and_j decode_ea, rmw8_eadst    # decode the EA and run RMW
+op_tas_rmwimpl:
+    dsllv flag_zc, t1, rmw_bitsize     # affect Z and C flags
+    sllv flag_nv, t1, rmw_bitsize      # affect N and V flags
+    #if M64K_CONFIG_BROKEN_TAS
+    andi t0, opcode, 3<<3              # check if EA mode is Dn
+    bnez t0, main_loop                 # if not, avoid writeback (broken TAS)
+    #endif
+    ori result, t1, 0x80               # writeback value: set bit 7
+    jr ra
 
 op_unk:
 # 68000+ instructions
-op_trapv: op_stop:
+op_stop: op_chk:
 # 68010+ instructions
 op_movec: op_bkpt: op_mvfccr: op_moves: op_rtd:
 # 68020+ instructions
