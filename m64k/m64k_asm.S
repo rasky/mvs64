@@ -219,6 +219,37 @@ opshiftsmem:
     sb \reg, 0(\address)
 .endm
 
+# Macros to load from the M68K memory space (after mapping).
+.macro lw_m68k reg, address
+    .if (\reg != t0)
+        .error "lw_m68k: register used to store into m68k memory must be 't0'"
+    .endif
+    lwl \reg, 0(\address)
+    lwr \reg, 3(\address)
+.endm
+
+.macro lhu_m68k reg, address
+    .if (\reg != t0)
+        .error "lhu_m68k: register used to store into m68k memory must be 't0'"
+    .endif
+    lhu \reg, 0(\address)
+.endm
+
+.macro lh_m68k reg, address
+    .if (\reg != t0)
+        .error "lh_m68k: register used to store into m68k memory must be 't0'"
+    .endif
+    lh \reg, 0(\address)
+.endm
+
+.macro lbu_m68k reg, address
+    .if (\reg != t0)
+        .error "lhu_m68k: register used to store into m68k memory must be 't0'"
+    .endif
+    lbu \reg, 0(\address)
+.endm
+
+
     .globl _m64k_asmrun
 _m64k_asmrun:
     addiu sp,sp,-128
@@ -953,7 +984,7 @@ rmw_no_ea:
     .set reorder
 rmw8_easrc:
     li rmw_bitsize , 24
-    lbu t0, 0(eaptr)
+    lbu_m68k t0, eaptr
     lbu t1, 3(dptr)
     jalr rmw_op
     sb result, 3(dptr)
@@ -961,7 +992,7 @@ rmw8_easrc:
 rmw16_easrc:
     check_addr_error eaptr32, read_address_error
     li rmw_bitsize , 16
-    lhu t0, 0(eaptr)
+    lhu_m68k t0, eaptr
     lhu t1, 2(dptr)
     jalr rmw_op
     sh result, 2(dptr)
@@ -969,35 +1000,36 @@ rmw16_easrc:
 rmw32_easrc:
     check_addr_error eaptr32, read_address_error
     li rmw_bitsize , 0
-    lwl t0, 0(eaptr)
-    lwr t0, 3(eaptr)
+    lw_m68k t0, eaptr
     lwu t1, 0(dptr)
     zx64 t0
     jalr rmw_op
     sw result, 0(dptr)
     j main_loop
 rmw8_eadst:
+    lbu_m68k t0, eaptr
     li rmw_bitsize , 24
+    move t1, t0
     lbu t0, 3(dptr)
-    lbu t1, 0(eaptr)
     jalr rmw_op
     sb_m68k result, eaptr
     j main_loop
 rmw16_eadst:
     check_addr_error eaptr32, read_address_error
+    lhu_m68k t0, eaptr
     li rmw_bitsize , 16
+    move t1, t0
     lhu t0, 2(dptr)
-    lhu t1, 0(eaptr)
     jalr rmw_op
     sh_m68k result, eaptr
     j main_loop
 rmw32_eadst:
     check_addr_error eaptr32, read_address_error
+    lw_m68k t0, eaptr
     li rmw_bitsize , 0
+    move t1, t0
     lwl t0, 0(dptr)   # NOTE: this is to handle immediate case (where dptr is PC-relative)
     lwr t0, 3(dptr)
-    lwl t1, 0(eaptr)
-    lwr t1, 3(eaptr)
     zx64 t0
     zx64 t1
     jalr rmw_op
@@ -1274,7 +1306,7 @@ op_cmpa_start:
     addi dptr, 8*4
     j rmw32_easrc
 op_cmpa16_rmwimpl:
-    lh t0, 0(eaptr)
+    lh_m68k t0, eaptr
     zx64 t0
     j op_cmp_rmwimpl
 
@@ -1305,13 +1337,13 @@ OP(mul):
     andi t0, opcode, 1<<8
     bnez t0, op_muls_exec
 op_mulu_exec:
-    lhu t0, 2(dptr)
-    lhu t1, 0(eaptr)
+    lhu t1, 2(dptr)
+    lhu_m68k t0, eaptr
     multu t0, t1
     j op_mul_finish
 op_muls_exec:
-    lh t0, 2(dptr)
-    lh t1, 0(eaptr)
+    lh t1, 2(dptr)
+    lh_m68k t0, eaptr
     mult t0, t1
 op_mul_finish:
     mflo flag_nv
@@ -1327,22 +1359,22 @@ OP(div):
     andi t0, opcode, 1<<8
     bnez t0, op_divs_exec
 op_divu_exec:
-    lw t0, 0(dptr)
-    lhu t1, 0(eaptr)
+    lw t1, 0(dptr)
+    lhu_m68k t0, eaptr
     #if M64K_CONFIG_DIVBYZERO
-    beqz t1, exception_divbyzero
+    beqz t0, exception_divbyzero
     #endif
-    divu zero, t0, t1
+    divu zero, t1, t0
     mflo t0
     and t2, t0, 0xFFFF
     j op_div_finish
 op_divs_exec:
-    lw t0, 0(dptr)
-    lh t1, 0(eaptr)
+    lw t1, 0(dptr)
+    lh_m68k t0, eaptr
     #if M64K_CONFIG_DIVBYZERO
-    beqz t1, exception_divbyzero
+    beqz t0, exception_divbyzero
     #endif
-    div zero, t0, t1
+    div zero, t1, t0
     mflo t0
     sll t2, t0, 16
     sra t2, 16
@@ -1629,7 +1661,7 @@ OP(aslm): OP(asrm):
     jal decode_ea                       # decode EA (note opsize=2 in OP(bits))
     check_addr_error eaptr32, read_address_error
     andi t1, opcode, 0x100
-    lh t0, 0(eaptr)
+    lh_m68k t0, eaptr
     bnez t1, op_asl_ea_left
 op_asl_ea_right:
     sra result, t0, 1
@@ -1650,7 +1682,7 @@ OP(lslm): OP(lsrm):
     jal decode_ea                       # decode EA (note opsize=2 in OP(bits))
     check_addr_error eaptr32, read_address_error
     andi t1, opcode, 0x100
-    lhu t0, 0(eaptr)
+    lhu_m68k t0, eaptr
     bnez t1, op_lsl_ea_left
 op_lsl_ea_right:
     srl result, t0, 1
@@ -1671,7 +1703,7 @@ OP(rolm): OP(rorm):
     jal decode_ea                       # decode EA (note opsize=2 in OP(bits))
     check_addr_error eaptr32, read_address_error
     andi t1, opcode, 0x100
-    lhu t0, 0(eaptr)
+    lhu_m68k t0, eaptr
     bnez t1, op_rom_ea_left
 op_rom_ea_right:
     srl result, t0, 1
@@ -1694,7 +1726,7 @@ OP(roxlm): OP(roxrm):
     jal decode_ea                       # decode EA (note opsize=2 in OP(bits))
     check_addr_error eaptr32, read_address_error
     andi t1, opcode, 0x100        # check rotate direction
-    lhu t0, 0(eaptr)              # fetch memory operand
+    lhu_m68k t0, eaptr            # fetch memory operand
     andi flag_x, 1                # isolate input carry bit
     bnez t1, op_roxm_ea_left
 op_roxm_ea_right:
@@ -1715,7 +1747,7 @@ op_roxm_finish:
 
 OP(clr):
     lax rmw_op, op_clr_rmwimpl
-    j rmw_eadst
+    j rmw_eadst                   # run rmw cycle (note: clr does a dummy read on 68000)
 op_clr_rmwimpl:
     li result, 0
     li flag_nv, 0
@@ -1732,24 +1764,26 @@ OP(tst):
     addi rmw_bitsize, -1
     beqz rmw_bitsize, tst_word
 tst_long:
-    lwl flag_zc, 0(eaptr)
-    lwr flag_zc, 3(eaptr)
-    move flag_nv, flag_zc
-    zx64 flag_zc
+    lw_m68k t0, eaptr
+    move flag_nv, t0
+    zx64 flag_zc, t0
     j main_loop
 tst_word:
-    lhu flag_zc, 0(eaptr)
-    sll flag_nv, flag_zc, 16
+    lhu_m68k t0, eaptr
+    move flag_zc, t0
+    sll flag_nv, t0, 16
     j main_loop
 tst_byte:
-    lbu flag_zc, 0(eaptr)
+    lbu_m68k t0, eaptr
+    move flag_zc, t0
     sll flag_nv, flag_zc, 24
     j main_loop
 
 OP(moveb):
     li opsize, 1
     jal decode_ea
-    lbu result, 0(eaptr)
+    lbu_m68k t0, eaptr
+    move result, t0
     srl opcode, 3
     srl t1, opcode, 6
     andi t1, 7
@@ -1763,9 +1797,10 @@ OP(movew):
     li opsize, 2
     jal decode_ea
     check_addr_error eaptr32, read_address_error
-    and t0, opcode, 0x1C0
-    lhu result, 0(eaptr)            # read word
-    beq t0, 0x040, op_movea16
+    and t1, opcode, 0x1C0
+    lhu_m68k t0, eaptr              # read word
+    beq t1, 0x040, op_movea16
+    move result, t0
     move flag_zc, result            # this is already good as flag_zc (as C is always cleared)
     sll flag_nv, result, 16         # flag_nv is the sign extension of the 16 bit value
     srl opcode, 3                   # move the EA dst mode into the EA src mode field
@@ -1780,10 +1815,10 @@ OP(movel):
     li opsize, 4
     jal decode_ea
     check_addr_error eaptr32, read_address_error
-    and t0, opcode, 0x1C0
-    lwl result, 0(eaptr)            # read unaligned 32-bit word (sign-extended)
-    lwr result, 3(eaptr)
-    beq t0, 0x040, op_movea32
+    and t1, opcode, 0x1C0
+    lw_m68k t0, eaptr               # read unaligned 32-bit word (sign-extended)
+    move result, t0
+    beq t1, 0x040, op_movea32
     move flag_nv, result            # It is already good as flag_nv, so store it there
     zx64 flag_zc, flag_nv           # flag_zc is the zero-extended copy (as C is always cleared)
     srl opcode, 3
@@ -1812,7 +1847,8 @@ OP(moveq):
     j main_loop
 
 OP(movea16):
-    lh result, 0(eaptr)
+    lh_m68k t0, eaptr
+    move result, t0
 op_movea32:
     srl t0, opcode, 7
     andi t0, 0x7<<2
@@ -1952,12 +1988,11 @@ movem_postincr:                              # Postincrement variant
 
 
 movem_mr_impl_16:
-    lh t0, 0(eaptr)
+    lh_m68k t0, eaptr
     sw t0, 0(reg_ptr)
     jr ra
 movem_mr_impl_32:
-    lwl t0, 0(eaptr)
-    lwr t0, 3(eaptr)
+    lw_m68k t0, eaptr
     sw t0, 0(reg_ptr)
     jr ra
 movem_rm_impl_16:
@@ -1985,7 +2020,7 @@ OP(mvfsr):
     jal decode_ea
     check_addr_error eaptr32, read_address_error
     jal flush_sr
-    lh zero, 0(eaptr)            # dummy read before write
+    lh_m68k t0, eaptr               # dummy read before write
     move result, t1
     sh_m68k result, eaptr
     j main_loop
@@ -1996,7 +2031,7 @@ OP(mvccr):
     check_addr_error eaptr32, read_address_error
     jal flush_sr
     lw_ctx t1, M64K_OFF_SR
-    lhu t0, 0(eaptr)
+    lhu_m68k t0, eaptr
     and t1, SR_MASK ^ CCR_MASK
     and t0, CCR_MASK
     or t0, t1
@@ -2009,7 +2044,7 @@ OP(mvtsr):
     jal decode_ea
     check_addr_error eaptr32, read_address_error
     jal flush_sr
-    lhu t0, 0(eaptr)
+    lhu_m68k t0, eaptr
     and t0, SR_MASK
     sw_ctx t0, M64K_OFF_SR
     jal_and_j reload_sr, main_loop
@@ -2259,7 +2294,7 @@ OP(scc):
     beq t0, 0b001000, op_dbcc
     li opsize, 1
     jal decode_ea
-    lb zero, 0(eaptr)                  # dummy fetch (performed by m68k)
+    lbu_m68k t0, eaptr                 # dummy fetch (performed by 68000)
     jal check_cc
     neg result, t0                     # convert 0x01 into 0xFF
     sb_m68k result, eaptr              # store result
