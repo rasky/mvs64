@@ -4,6 +4,12 @@
 #include <libdragon.h>
 #include <string.h>
 
+#if M64K_CONFIG_LOG_EXCEPTIONS
+#define logexcf(...)    debugf(__VA_ARGS__)
+#else
+#define logexcf(...)    ({ })
+#endif
+
 #define SR_T0   0x8000  // Trace 0
 #define SR_T1   0x4000  // Trace 1
 #define SR_S    0x2000  // Supervisor mode
@@ -131,19 +137,18 @@ int64_t m64k_run(m64k_t *m64k, int64_t until)
             switch (m64k->pending_exc[0]) {
             #if M64K_CONFIG_ADDRERR
             case M64K_PENDINGEXC_ADDRERR:
-                debugf("[m64k] address error\n");
+                logexcf("[m64k] address error\n");
                 m64k_exception_address(m64k, m64k->pending_exc[1], m64k->pending_exc[2]);
                 break;
             #endif
             case M64K_PENDINGEXC_RSTO:
-                debugf("[m64k] RSTO asserted\n");
+                logexcf("[m64k] RSTO asserted\n");
                 break;
             case M64K_PENDINGEXC_DIVBYZERO:
-                debugf("[m64k] division by zero\n");
+                logexcf("[m64k] division by zero\n");
                 m64k_exception_divbyzero(m64k);
                 break;
             case M64K_PENDINGEXC_IRQ:
-                debugf("[m64k] IRQ %ld\n", m64k->pending_exc[1]);
                 m64k_exception_interrupt(m64k, m64k->pending_exc[1]);
                 break;
             default:

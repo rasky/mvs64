@@ -19,4 +19,15 @@
 // accesses across the address space wrap-around (eg: 32-bit read at 0x00FFFFFE).
 #define M64K_CONFIG_ADDR_WRAP      1
 
+// Set to 1 to emulate the TAS instruction without writeback.
+// This is the actual behaviour on Sega Megadrive because of a hardware bug
+// in the board (the TAS memory transaction is not correctly supported), so
+// define to 1 if you want to emulate the Megadrive or a similarly broken hardware.
+#define M64K_CONFIG_BROKEN_TAS     0
+
+// Set to 1 if you want m64k to log (via debugf) all unusual exceptions happening
+// during emulation: address errors, privilege violations, divisions by zero, etc.
+// This might be useful during the development phase.
+#define M64K_CONFIG_LOG_EXCEPTIONS 0
+
 #endif // M64K_CONFIG_H
