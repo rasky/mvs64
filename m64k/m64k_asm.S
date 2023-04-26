@@ -2428,8 +2428,9 @@ op_bitsi:   # bit operation using immediate value as index
     addiu m_pc, 2
 op_bits_start:
     lax rmw_op, bits_impl
-    andi t0, opcode, 0b111000    # check if EA mode is Dn
-    beqz t0, op_bits_dreg
+    andi t0, opcode, 0b111000
+    beq t0, 0<<3, op_bits_dreg   # check if EA mode is Dn
+    beq t0, 1<<3, op_movep       # check if EA mode is An => movep
 op_bits_ea:
     li bitidx_mask, 7            # standard EA: 8-bit operation
     li opsize, 1
@@ -2461,6 +2462,42 @@ bittable:
     or result, t1, t2            # bset: result = value | (1 << bitindex)
     jr ra
     #undef bitmask
+
+OP(movep): # NTOE: dptr was already decoded in op_bits
+    xori opcode, 1<<5            # convert EA mode to (d16,An)
+    andi t0, opcode, 1<<6        # check size bit
+    li opsize, 4                 #  bit 6 = 1 => 32-bit operation
+    bnez t0, movep_start
+    li opsize, 2                 #  bit 6 = 0 => 16-bit operation
+    addi dptr, 2
+movep_start:
+    jal decode_ea                # now decode EA
+    andi t1, opcode, 1<<7        # check direction bit
+    bnez t1, movep_wmem
+movep_wreg:
+    lbu_m68k t0, eaptr           # read memory
+    addiu opsize, -2
+    sb t0, 0(dptr)               # write register
+    lb t0, 2(eaptr)              
+    sb t0, 1(dptr)
+    beqz opsize, main_loop
+    lb t0, 4(eaptr)              
+    sb t0, 2(dptr)
+    lb t0, 6(eaptr)              
+    sb t0, 3(dptr)
+    j main_loop
+movep_wmem:
+    lbu result, 0(dptr)          # read register
+    addiu opsize, -2
+    sb_m68k result, eaptr        # write memory
+    lbu result, 1(dptr)
+    sb result, 2(eaptr)
+    beqz opsize, main_loop
+    lbu result, 2(dptr)
+    sb result, 4(eaptr)
+    lbu result, 3(dptr)
+    sb result, 6(eaptr)
+    j main_loop
 
 OP(exg):
     andi t0, opcode, 3<<6
