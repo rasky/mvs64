@@ -53,6 +53,10 @@
 #define RdpLoadTlut(tidx, lowidx, highidx) \
     ((cast64(0x30)<<56) | (cast64(tidx) << 24) | (cast64(lowidx)<<46) | (cast64(highidx)<<14))
 
+#define RdpLoadBlock(tidx, s0, t0, num_texels, pitch) \
+    ((cast64(0x33)<<56) | (cast64(tidx) << 24) | (cast64(s0)<<44) | (cast64(t0)<<32) | \
+     (cast64((num_texels)-1)<<12) | (cast64((2048 + (pitch)/8 - 1) / ((pitch)/8))<<0))
+
 #define RdpSetTileSizeFX(tidx,s0,t0,s1,t1) \
     ((cast64(0x32)<<56) | ((tidx)<<24) | (cast64(s0)<<44) | (cast64(t0)<<32) | ((s1)<<12) | ((t1)<<0))
 #define RdpSetTileSizeI(tidx,s0,t0,s1,t1) \
