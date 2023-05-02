@@ -17,7 +17,7 @@ static void rsp_sprite_draw(uint8_t *src, int palnum, int x0, int y0, int sw, in
 	assertf(sw <= 16 && sh <= 16, "sprite too large: %dx%d", sw, sh);
 	assertf(sw > 0 && sh > 0, "sprite too small: %dx%d", sw, sh);
 	rspq_write(RSP_OVL_ID, 0x2, PhysicalAddr(src), 
-		(palnum << 20) | (x0 << 10) | y0,
+		(palnum << 24) | ((x0 & 0xFFF) << 12) | (y0 & 0xFFF),
 		(sw-1) | ((sh-1) << 4) | (flipx ? 0x100 : 0) | (flipy ? 0x200 : 0));
 }
 static void rsp_pal_convert(uint16_t *src, uint16_t *dst) {

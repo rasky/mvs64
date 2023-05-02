@@ -427,9 +427,9 @@ cmd_sprite_begin:
     # cmd_sprite_draw - draw a sprite
     #
     # a0: sprite pointer
-    # a1: bit 0 .. 9: y position
-    #     bit 10..19: x position
-    #     bit 20..27: palette
+    # a1: bit 0 ..11: signed y position
+    #     bit 12..23: signed x position
+    #     bit 24..31: palette
     # a2: bit 0 .. 3: width of the sprite (0..15 meaning 1..16)
     #     bit 4 .. 7: height of the sprite (0..15 meaning 1..16)
     #     bit 8:      flip x
@@ -467,7 +467,6 @@ cmd_sprite_begin:
     .func cmd_sprite_draw
 cmd_sprite_draw:
     li s3, %lo(RDPQ_CMD_STAGING)
-    srl palettenum, a1, 20
 
     li s0, %lo(PALETTE_CACHE)
     li s1, %lo(CACHE_INDICES)
@@ -476,7 +475,7 @@ cmd_sprite_draw:
     luv vindex0,  0,s1
     luv vindex1,  8,s1
 
-    srl palettenum, a1, 20
+    srl palettenum, a1, 24
     mtc2 palettenum, kpalettenum
 
     # Check if the palette is already in the cache
@@ -547,9 +546,10 @@ sprite_draw:
     sb t0, 5*8+5(s3)
 
     # Extract X/Y
-    andi rect_y0, a1, 0x3FF
-    srl rect_x0, a1, 10
-    andi rect_x0, 0x3FF
+    sll rect_x0, a1, 8
+    sll rect_y0, a1, 20
+    sra rect_x0, 20
+    sra rect_y0, 20
 
     # Convert the coordinates from [0..511] to [-16..496]
     li t0, 512-16
