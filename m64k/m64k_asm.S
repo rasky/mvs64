@@ -67,7 +67,7 @@ opshiftsmem:
 #define m_cycles     a1    // cycles to execute (NOTE: must be kept caller-saved register)
 #define mmap_mask    a2
 #if M64K_CONFIG_TIMING_ACCURACY >= 0
-#define rmw_cyctable a3    // pointer to the current cycletable (NOTE: register is reused in movem)
+#define rmw_cyctable a3    // pointer to the current cycletable, or small positive value for NULL
 #endif
 
 #define lax_base    v0
@@ -77,7 +77,7 @@ opshiftsmem:
 #define eaptr       s1
 #define dptr        s2
 #define opsize      s4
-#define cycles_long s5
+#define __________  s5    // NOTE: this is used in movem
 #define flag_nv     s6    // bit 31: N; bit 63: N^V
 #define flag_zc     s7    // bit 0..31: !Z; bit 32: C
 #define flag_x      s8    // bit 0: X
@@ -1560,7 +1560,7 @@ op_divu_exec:
     beqz t0, exception_divbyzero
     #endif
     sgt t3, t1, t0
-    li cycles_long, 100
+    li rmw_cyctable, 100
     divu zero, t1, t0
     mflo t0
     and t2, t0, 0xFFFF
@@ -1572,7 +1572,7 @@ op_divs_exec:
     beqz t0, exception_divbyzero
     #endif
     sgt t3, t1, t0
-    li cycles_long, 115
+    li rmw_cyctable, 115
     div zero, t1, t0
     mflo t0
     sll t2, t0, 16
@@ -1586,7 +1586,7 @@ op_div_finish:
     sh t0, 2(dptr)
     .set noreorder
     bnez t3, 1f
-    sub m_cycles, cycles_long
+    sub m_cycles, rmw_cyctable
 1:  .set reorder
     j main_loop
 op_div_overflow:
@@ -2132,7 +2132,7 @@ op_movea32:
     #define reg_incr          t3
     #define eaptr32_diff      t2
     #define ctz_lut           opcode
-    #define reg_incr_3x       a3
+    #define reg_incr_3x       s5
 
     #define MOVEM_4BIT        1            // Faster 4-bit-at-a-time movem
 
@@ -2237,9 +2237,6 @@ movem_loop:                              # Main movem loop
 #endif
 
 movem_mr_end:
-    #if M64K_CONFIG_TIMING_ACCURACY >= 0
-    li rmw_cyctable, 0                      # Restore overwritten a3 register
-    #endif
     bltz ea_reg, main_loop                   # If no register writeback is needed, we are done
     addu eaptr32, eaptr, eaptr32_diff        # Calculate the new 32-bit address given the current pointer
     sw_ctx eaptr32, M64K_OFF_AREGS,ea_reg   # Write back the new address to the address register
@@ -2583,13 +2580,13 @@ OP(bcc):
     beq t0, 0x6100, op_bsr
     lb t3, -1(m_pc)                    # fetch signed 8-bit displacement (from opcode)
     #if M64K_CONFIG_TIMING_ACCURACY >= 0
-    li cycles_long, 8
+    li rmw_cyctable, 8
     #endif
     bnez t3, bcc_exec                  # if displacement is 0, there's a 16-bit displacement
 bcc_disp_16:
     lh t3, 0(m_pc)                     # fetch 16-bit displacement
     #if M64K_CONFIG_TIMING_ACCURACY >= 0
-    li cycles_long, 12
+    li rmw_cyctable, 12
     #endif
     addiu m_pc, 2                      # increment PC
     addiu t3, -2                       # displacement refers to PC before increment
@@ -2598,7 +2595,7 @@ bcc_exec:
     .set noreorder
     beqzl t0, main_loop                # cc is false => branch is not taken
      #if M64K_CONFIG_TIMING_ACCURACY >= 0
-     sub m_cycles, cycles_long
+     sub m_cycles, rmw_cyctable
      #else
      nop
      #endif
