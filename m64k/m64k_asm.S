@@ -6,6 +6,11 @@
 #define SR_MASK    0xA71F
 #define CCR_MASK   0x1F
 
+# When set to 1, most MIPS registers will be set to random values at start.
+# This is useful when running the testsuite, to verify that the code does not
+# depend on the initial values of the registers.
+#define RANDOM_INITIAL_VALUES  0
+
     .set noreorder
 
 .macro check_addr_error reg, label
@@ -58,10 +63,12 @@ opshiftsmem:
 #define ALIGN(lbl)  .balign 32; lbl
 
 #define OP(x)       .balign 32; op_##x
-#define ctx         a0
-#define m_cycles    a1    // cycles to execute (NOTE: must be kept caller-saved register)
-#define mmap_mask   a2
-#define _________   a3    // warning: used by move.m, check there before using it
+#define ctx          a0
+#define m_cycles     a1    // cycles to execute (NOTE: must be kept caller-saved register)
+#define mmap_mask    a2
+#if M64K_CONFIG_TIMING_ACCURACY >= 0
+#define rmw_cyctable a3    // pointer to the current cycletable (NOTE: register is reused in movem)
+#endif
 
 #define lax_base    v0
 #define zx64_mask   v1
@@ -70,7 +77,7 @@ opshiftsmem:
 #define eaptr       s1
 #define dptr        s2
 #define opsize      s4
-#define m_cyc_table s5
+#define cycles_long s5
 #define flag_nv     s6    // bit 31: N; bit 63: N^V
 #define flag_zc     s7    // bit 0..31: !Z; bit 32: C
 #define flag_x      s8    // bit 0: X
@@ -113,6 +120,46 @@ opshiftsmem:
     .else
         sw \reg, \offset(ctx)
     .endif
+.endm
+
+.macro use_cycles cycles
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    addi m_cycles, -\cycles
+    #endif
+.endm
+
+.macro set_rmw_cyctable table
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    la rmw_cyctable, \table
+    #endif
+.endm
+
+# Decrement the cycle counter using the value fetched from the current cycletable
+# at the specified offset.
+.macro use_cycles_table offset
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    bgez rmw_cyctable, 1f                     # If cycletable is not "zero-ish" (not 0x80nn_nnnn)
+    lbu rmw_cyctable, \offset(rmw_cyctable)   #  fetch it
+    sub m_cycles, rmw_cyctable                #  fecrement cycle counter
+1:  # NOTE: the fetched number will be left as rmw_cyctable
+    # and will be treated as "zero-ish" next time we run this macro.
+    # This saves one instruction as we don't need to set rmw_cyctable to zero
+    #endif
+.endm
+
+.macro use_cycles_opmask mask, value, cycles
+    #if M64K_CONFIG_TIMING_ACCURACY >= 1
+    .set noat
+    .set noreorder
+    andi $1, opcode, \mask
+    .if \value != 0
+        xori $1, \value
+    .endif
+    beqzl $1, 1f
+    addi m_cycles, -\cycles
+1:  .set at
+    .set reorder
+    #endif
 .endm
 
 #define LAX_BASE_ADDR main_loop
@@ -271,7 +318,6 @@ _m64k_asmrun:
     #endif
     la lax_base, LAX_BASE_ADDR
     dli zx64_mask, 0x00000000FFFFFFFF
-    la m_cyc_table, __m64k_cycle_table
     lw t1, M64K_OFF_PC(ctx)
     lw t0, M64K_OFF_SR(ctx)
 
@@ -288,24 +334,51 @@ _m64k_asmrun:
     nop
 
     sw m_cycles, M64K_OFF_TS_START(ctx)
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    li rmw_cyctable, 0
+    #endif
 
-ALIGN(main_loop): OP(nop):
+    #if RANDOM_INITIAL_VALUES
+    #define C0_COUNT	$9
+    # Corrupt registers to trigger bugs
+    li cycles_long, 0x1234
+    li opsize, 0x1234
+    li eaptr, 0x12345
+    li eaptr32, 0x12345
+    li result, 0x12345678
+    li rmw_bitsize, 0x11
+    dli t0, 0x8000000080000000
+    mfc0 t1, C0_COUNT
+    dsll t1, 32
+    mfc0 t2, C0_COUNT
+    or t1, t2
+    and flag_nv, t0
+    not t0
+    and t1, t0
+    or flag_nv, t0
+    mfc0 t1, C0_COUNT
+    andi t0, t1, 1
+    xor t1, t0
+    or flag_x, t1
+    #endif
+
+ALIGN(main_loop):
     blez m_cycles, main_loop_exit
-    sw m_cycles, M64K_OFF_TS_CUR(ctx)
+     sw m_cycles, M64K_OFF_TS_CUR(ctx)
     lbu t0, M64K_OFF_CHECK_INTERRUPTS(ctx)
     lhu opcode, 0(m_pc)
     bnez t0, check_interrupt
     #if M64K_CONFIG_ADDRERR
     sw opcode, M64K_OFF_IR(ctx)
     #endif
-    addu t1, opcode, m_cyc_table
-    lbu t1, 0(t1)
-    srl t0, opcode, 12
-    sll t0, 2
-    lw t0, optable(t0)
-    addi m_pc, 2
+    #if M64K_CONFIG_TIMING_ACCURACY < 0
+    addi m_cycles, M64K_CONFIG_TIMING_ACCURACY
+    #endif
+    srl t1, opcode, 12
+    sll t1, 2
+    lw t0, optable(t1)
     jr t0
-    sub m_cycles, t1
+     addi m_pc, 2
 op_tbl0:
     srl t0, opcode, 6
     andi t0, 0xF << 2
@@ -495,6 +568,9 @@ reload_stack:
     # Table to help setting up address error. Each entry is the PC offset to rollback.
 addrerr_pcoff:  .byte  0,  0, -2, -2, -2, -2, -2,  0
 addrerr7_pcoff: .byte -2, -2, -2, -2,  0,  0,  0,  0
+    # Table to rollback EA cycle count
+addrerr_cycoff: .byte  0,  0,  4,  4,  6,  8, 10,  0
+                .byte  8, 12,  8, 10,  4,  0,  0,  0
 
 #define FC_DATA     1         // Error while accessing data
 #define FC_PROGRAM  2         // Error while fetching code
@@ -516,6 +592,7 @@ address_error:
     li t0, M64K_PENDINGEXC_ADDRERR
     sw_ctx t0, M64K_OFF_PENDINGEXC+0
     sw_ctx eaptr32, M64K_OFF_PENDINGEXC+4
+    use_cycles 50
 
     # Most opcodes that generate an address error have a standard EA
     # encoding in bits 0..6, and we handle those just below. Some of them,
@@ -547,8 +624,14 @@ adderr_off7:
     andi t0, opcode, 7
     addi t0, 8
 addrerr_adjust_pc:
-    lb t0, addrerr_pcoff(t0)             # PC offset
-    add m_pc, t0                         # Rollback PC
+    lb t1, addrerr_pcoff(t0)             # PC offset
+    add m_pc, t1                         # Rollback PC
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    lb t1, addrerr_cycoff(t0)            # Cycle offset
+    add m_cycles, t1                     # Rollback cycle count
+    bne opsize, 4, addrerr_finish        # If the opcode is 32-bit
+    add m_cycles, 4                      # Remove another 4 cycles from EA
+    #endif
 addrerr_finish:
     lw_ctx opcode, M64K_OFF_IR          # Restore original opcode
     andi t0, opcode, 0xFFE0
@@ -792,6 +875,8 @@ dbz_fetch_pcoff:
 
     .text
 ALIGN(decode_imm):
+    set_rmw_cyctable rmw_cyctable_immediate
+decode_imm_nocyctable:
     srl t0, opcode, 6
     andi t0, 0x3
     beqz t0, imm_8
@@ -825,11 +910,11 @@ ea7_table:
 
 .macro decode_opsize
     .set noat
-    bnez opsize, 1f        # if opsize was not specified
-    srl opsize, opcode, 6  # extract it from opcode bit 6-7
+    bnez opsize, 1f            # if opsize was not specified
+    srl opsize, opcode, 6      # extract it from opcode bit 6-7
     andi opsize, 0x3
     li $1, 1
-    sllv opsize, $1, opsize
+    sllv opsize, $1, opsize    # 0b00=1, 0b01=2, 0b10=4
     .set at
 1:
 .endm
@@ -851,40 +936,44 @@ ea_111: # Register-less EAs
     lw t1, ea7_table(t1)
     jr t1
 
-ea_000: # Dn
-    decode_opsize
-    la_ctx eaptr, M64K_OFF_DREGS+4,t1
-    sub eaptr, opsize
-    li eaptr32, 0
-    jr ra
 ea_001: # An
+    addiu t1, 8*4
+ea_000: # Dn
+    la_ctx eaptr, M64K_OFF_DREGS+4,t1
     decode_opsize
-    la_ctx eaptr, M64K_OFF_AREGS+4,t1
     sub eaptr, opsize
     li eaptr32, 0
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    addi rmw_cyctable, 4
+    #endif
     jr ra
 ea_010: # (An)
     lw_ctx eaptr32, M64K_OFF_AREGS,t1
     map_m68k eaptr, eaptr32
+    use_cycles 4
     jr ra
 ea_011: # (An)+
     lw_ctx eaptr32, M64K_OFF_AREGS,t1
     decode_opsize
-    add t0, eaptr32, opsize
-    bne t1, 7*4, 1f   # if A7 (stack pointer), align to word
+    xor t2, t1, 7*4                      # check if t1(reg) is A7 (stack pointer)
+    add t0, eaptr32, opsize              # increment address register
+    bnez t2, 1f                          # if A7 (stack pointer), align to word
     add t0, 1
     and t0, ~1
-1:  sw_ctx t0, M64K_OFF_AREGS,t1
-    map_m68k eaptr, eaptr32
+1:  sw_ctx t0, M64K_OFF_AREGS,t1         # writeback incremented register
+    map_m68k eaptr, eaptr32              # map address to N64 space
+    use_cycles 4
     jr ra
 ea_100: # -(An)
-    lw_ctx eaptr32, M64K_OFF_AREGS,t1   # read address register
+    lw_ctx eaptr32, M64K_OFF_AREGS,t1    # read address register
     decode_opsize                        # decode opsize (if wasn't already)
+    xor t2, t1, 7*4
     sub eaptr32, opsize                  # decrement address register
-    bne t1, 7*4, 1f                      # if A7 (stack pointer), align to word
+    bnez t2, 1f                          # if A7 (stack pointer), align to word
     and eaptr32, ~1
-1:  sw_ctx eaptr32, M64K_OFF_AREGS,t1   # write back address register
+1:  sw_ctx eaptr32, M64K_OFF_AREGS,t1    # write back address register
     map_m68k eaptr, eaptr32              # map address to N64 space
+    use_cycles 6
     jr ra
 ea_101: # (d16,An)
     lw_ctx eaptr32, M64K_OFF_AREGS,t1
@@ -892,38 +981,44 @@ ea_101: # (d16,An)
     addi m_pc, 2
     addu eaptr32, t0
     map_m68k eaptr, eaptr32
+    use_cycles 8
     jr ra
 ea7_011: # (d8,PC,Xn)
     lw t0, pc_diff
-    addu eaptr32, m_pc, t0    # Compute exact eaptr32 (in case it's read via LEA/PEA)
-    j ea_110_inner    
+    addu eaptr32, m_pc, t0              # Compute exact 32-bit PC
+    j ea_110_inner
 ea_110: # (d8,An,Xn)
-    lw_ctx eaptr32, M64K_OFF_AREGS,t1   # read An
+    lw_ctx eaptr32, M64K_OFF_AREGS,t1   # read An as base address
 ea_110_inner:
-    lbu t1, 0(m_pc)  # read extension word
-    lb t0, 1(m_pc)   # read 8-bit displacement
-    addi m_pc, 2
-    addu eaptr32, t0
-    srl t0, t1, 2       # calculate pointer to Xn
+    lbu t1, 0(m_pc)                     # read 8-bit extension word
+    lb t0, 1(m_pc)                      # read 8-bit signed displacement
+    addi m_pc, 2                        # increment PC after fetch
+    addu eaptr32, t0                    # Add displacement to address
+    srl t0, t1, 2                       # Extract Xn register index
     andi t0, 0xF << 2
-    andi t2, t1, 0x8
-    add t0, ctx
-    lw t1, M64K_OFF_DREGS(t0)
-    bnez t2, 1f
-    lh t1, M64K_OFF_DREGS+2(t0)
-1:  addu eaptr32, t1
+    andi t2, t1, 0x8                    # Extract size bit (word / long)
+    add t0, ctx                         # Compute Xn register address in context
+    .set noreorder
+    bnezl t2, 1f                        # if size bit is long, load with lw
+     lw t1, M64K_OFF_DREGS(t0)
+    .set reorder
+    lh t1, M64K_OFF_DREGS+2(t0)         # if size bit is word, load with lh
+1:  use_cycles 10
+    addu eaptr32, t1
     map_m68k eaptr, eaptr32
     jr ra
 ea7_000: # (xxx).W
     lh eaptr32, 0(m_pc)
     addi m_pc, 2
     map_m68k eaptr, eaptr32
+    use_cycles 8
     jr ra
 ea7_001: # (xxx).L
     lwl eaptr32, 0(m_pc)
     lwr eaptr32, 3(m_pc)
     addi m_pc, 4
     map_m68k eaptr, eaptr32
+    use_cycles 12
     jr ra
 ea7_010: # (d16,PC)
     lw t0, pc_diff
@@ -932,15 +1027,16 @@ ea7_010: # (d16,PC)
     addi m_pc, 2
     add eaptr32, t0
     map_m68k eaptr, eaptr32
+    use_cycles 8
     jr ra
 ea7_100: # #<data>
-    move eaptr32, m_pc
+    move eaptr32, m_pc        # The address is stored at the current PC (in the fetch stream)
     decode_opsize
-    add m_pc, opsize
-    bne opsize, 1, 1f
-    addi eaptr32, 1           # if opsize is byte, skip a byte
-    addi m_pc, 1
-1:
+    xori t0, opsize, 1        # check if opsize is 1 (byte)
+    use_cycles 4
+    bnez t0, 1f               # if it is 1
+    addi eaptr32, 1           #  skip a byte (byte to fetch is right-aligned)
+1:  add m_pc, eaptr32, opsize # compute new PC after the address
     map_m68k eaptr, eaptr32
     jr ra
 
@@ -958,6 +1054,34 @@ ea7_101: ea7_110: ea7_111:
 rmw_table:
     .long   rmw8_easrc, rmw16_easrc, rmw32_easrc, invalid_opmode
     .long   rmw8_eadst, rmw16_eadst, rmw32_eadst, invalid_opmode
+
+#if M64K_CONFIG_TIMING_ACCURACY >= 0
+            # EA-mem: easrc 8/16, easrc 32, eadst 8/16, eadst 32
+            # EA-reg: easrc 8/16, easrc 32, eadst 8/16, eadst 32
+rmw_cyctable_logical:
+    .byte   4, 10, 8, 16
+    .byte   4, 6, 4, 8
+rmw_cyctable_immediate:
+    .byte   12, 24, 12, 24
+    .byte   8, 16, 8, 16
+rmw_cyctable_cmpi:
+    .byte   8, 16, 8, 16
+    .byte   8, 14, 8, 14
+rmw_cyctable_quick:
+    .byte   8, 16, 8, 16
+    .byte   4, 8, 4, 8
+rmw_cyctable_singleop:
+    .byte   8, 16, 8, 16
+    .byte   4, 6, 4, 6
+rmw_cyctable_multiprec:
+    .byte   6, 18, 6, 18
+    .byte   4, 8, 4, 8
+    .byte   4, 8, 4, 8       # we decode EA twice for multiprec, so repeat the EA-reg timings
+rmw_cyctable_decimal:
+    .byte   0, 0,6,8         # ABCD/SBCD use byte EA-Mem/EA-reg
+    .byte   0, 0,6,6         # NBCD (ab-)uses eadst32
+    .byte   0, 0,6,6         # we decode EA twice for decimal, so repeat the EA-reg timings
+#endif
 
     .text
     .set noreorder
@@ -983,23 +1107,31 @@ rmw_no_ea:
     nop
     .set reorder
 rmw8_easrc:
-    li rmw_bitsize , 24
+    li rmw_bitsize, 24
+    use_cycles_table 0
     lbu_m68k t0, eaptr
     lbu t1, 3(dptr)
     jalr rmw_op
     sb result, 3(dptr)
     j main_loop
 rmw16_easrc:
+    use_cycles_table 0
     check_addr_error eaptr32, read_address_error
-    li rmw_bitsize , 16
+    li rmw_bitsize, 16
     lhu_m68k t0, eaptr
     lhu t1, 2(dptr)
     jalr rmw_op
     sh result, 2(dptr)
     j main_loop
 rmw32_easrc:
+    #if M64K_CONFIG_TIMING_ACCURACY >= 1
+    use_cycles_opmask 0b111<<3, 0, 2          # 2 more cycles if EA is Dn
+    use_cycles_opmask 0b111111, 0b111100, 2   # 2 more cycles if EA is immediate
+    #endif
+    use_cycles_table 1
+rmw32_easrc_nocycfixup:
     check_addr_error eaptr32, read_address_error
-    li rmw_bitsize , 0
+    li rmw_bitsize, 0
     lw_m68k t0, eaptr
     lwu t1, 0(dptr)
     zx64 t0
@@ -1008,7 +1140,8 @@ rmw32_easrc:
     j main_loop
 rmw8_eadst:
     lbu_m68k t0, eaptr
-    li rmw_bitsize , 24
+    li rmw_bitsize, 24
+    use_cycles_table 2
     move t1, t0
     lbu t0, 3(dptr)
     jalr rmw_op
@@ -1017,7 +1150,8 @@ rmw8_eadst:
 rmw16_eadst:
     check_addr_error eaptr32, read_address_error
     lhu_m68k t0, eaptr
-    li rmw_bitsize , 16
+    li rmw_bitsize, 16
+    use_cycles_table 2
     move t1, t0
     lhu t0, 2(dptr)
     jalr rmw_op
@@ -1026,7 +1160,8 @@ rmw16_eadst:
 rmw32_eadst:
     check_addr_error eaptr32, read_address_error
     lw_m68k t0, eaptr
-    li rmw_bitsize , 0
+    li rmw_bitsize, 0
+    use_cycles_table 3
     move t1, t0
     lwl t0, 0(dptr)   # NOTE: this is to handle immediate case (where dptr is PC-relative)
     lwr t0, 3(dptr)
@@ -1051,6 +1186,9 @@ invalid_opmode:
 OP(addq): OP(subq):
     andi t0, opcode, 3<<6
     beq t0, 3<<6, op_scc
+    set_rmw_cyctable rmw_cyctable_quick
+    use_cycles_opmask (7<<3)|(3<<6), (1<<3)|(2<<6), -2   # 2 fewer cycles if EA is An/long
+    use_cycles_opmask (7<<3)|(3<<6), (1<<3)|(1<<6), +4   # 4 more cycles if EA is An/word
     lax rmw_op, op_subq_rmwimpl
     andi t0, opcode, 1<<8
     bnez t0, 1f
@@ -1085,16 +1223,19 @@ op_subi:  # (same cacheline)
     lax rmw_op, op_sub_rmwimpl
     jal_and_j decode_imm, rmw_eadst
 op_cmpi:
+    set_rmw_cyctable rmw_cyctable_cmpi
     lax rmw_op, op_cmp_rmwimpl
-    jal_and_j decode_imm, rmw_eadst
+    jal_and_j decode_imm_nocyctable, rmw_eadst
 
 OP(add):
+    set_rmw_cyctable rmw_cyctable_logical
     lax rmw_op, op_add_rmwimpl
     jal decode_dptr
     andi t0, opcode, 0xC0
     beq t0, 0xC0, op_adda     # if adda jump to implementation
     andi t0, opcode, 0x130    # check if the opcode is addx instead
     xori t0, 0x100
+    use_cycles_opmask (7<<3)|(3<<6)|(1<<8), (1<<3)|(2<<6)|(0<<8), 2   # 2 more cycles if EA is dst-An/word
     li opsize, 0              # opsize not calculated yet
     beqz t0, op_addx          # if addx, jump to implementation
     j rmw
@@ -1109,12 +1250,14 @@ op_add_rmwimpl_flags:
     jr ra
 
 OP(sub):
+    set_rmw_cyctable rmw_cyctable_logical
     lax rmw_op, op_sub_rmwimpl
     jal decode_dptr
     andi t0, opcode, 0xC0
     beq t0, 0xC0, op_suba     # if suba jump to implementation
     andi t0, opcode, 0x130
     xori t0, 0x100
+    use_cycles_opmask (7<<3)|(3<<6)|(1<<8), (1<<3)|(2<<6)|(0<<8), 2   # 2 more cycles if EA is dst-An
     li opsize, 0              # opsize not calculated yet
     beqz t0, op_subx          # if subx, jump to implementation
     j rmw
@@ -1129,21 +1272,26 @@ op_sub_rmwimpl_flags:
     jr ra
 
 OP(nbcd):
+    set_rmw_cyctable rmw_cyctable_decimal+1
     li opsize, 1
     lax rmw_op, op_nbcd_rmwimpl
     j rmw_eadst
 OP(abcd):
+    set_rmw_cyctable rmw_cyctable_decimal
     li opsize, 1
     lax rmw_op, op_abcd_rmwimpl
     j op_addx_start
 op_sbcd:
+    set_rmw_cyctable rmw_cyctable_decimal
     li opsize, 1
     lax rmw_op, op_sbcd_rmwimpl
     j op_addx_start
 op_subx: # opsize already set to 0 by caller
+    set_rmw_cyctable rmw_cyctable_multiprec
     lax rmw_op, op_subx_rmwimpl
     j op_addx_start
 op_addx: # opsize already set to 0 by caller
+    set_rmw_cyctable rmw_cyctable_multiprec
     lax rmw_op, op_addx_rmwimpl
 op_addx_start:
     andi t0, opcode, 0x8         # isolate R/M bit
@@ -1260,11 +1408,16 @@ op_adda_start:
     li opsize, 2                      # Force word size in EA decoding
     jal decode_ea                     # Decode EA
     addi eaptr, -2                    # Convert eaptr to long (for rmw32)
-    j rmw32_easrc                     # Do RMW
+    use_cycles 8
+    j rmw32_easrc_nocycfixup          # Do RMW
 1:  lax rmw_op, op_adda32_rmwimpl   # ADDA 32-bit
     li opsize, 4                      # Force long size in EA decoding
     jal decode_ea                     # Decode EA
-    j rmw32_easrc                     # Do RMW
+    use_cycles 10
+    use_cycles_opmask 7<<3,1<<3,-2
+    use_cycles_opmask 7<<3,0<<3,-2
+    use_cycles_opmask 0b111111,0b111100,2
+    j rmw32_easrc_nocycfixup          # Do RMW
 op_adda16_rmwimpl:
     sll t0, 16
     sra t0, 16
@@ -1280,10 +1433,10 @@ OP(cmp):
     beq t0, 0b011 << 6, op_cmpa16
     beq t0, 0b111 << 6, op_cmpa32
     bge t0, 0b100 << 6, op_eor
+    use_cycles_opmask (1<<7)|(7<<3), 1<<7, -2     # cmp.l with EA=Dn takes 2 cycle less
+    use_cycles_opmask 0b11111111, 0b10111100, -2  # cmp.l #<data>,Dn takes 2 cycle less
     lax rmw_op, op_cmp_rmwimpl
-    jal decode_dptr
-    li opsize, 0              # opsize not calculated yet
-    j rmw    
+    j op_group_logical
 op_cmp_rmwimpl:
     dsubu result, t1, t0
     dsll flag_zc, result, rmw_bitsize 
@@ -1293,24 +1446,29 @@ op_cmp_rmwimpl:
     j main_loop               # skip rmw writeback
 
 OP(cmpa16):
+    use_cycles 6
     li opsize, 2
     jal decode_ea
     lax rmw_op, op_cmpa16_rmwimpl
     j op_cmpa_start
 op_cmpa32:
+    use_cycles 10
+    use_cycles_opmask 0b110000, 0b000000, -4  # cmpa.l Dn/An,An takes 4 cycle less
     li opsize, 4
     jal decode_ea
     lax rmw_op, op_cmp_rmwimpl
 op_cmpa_start:
     jal decode_dptr
     addi dptr, 8*4
-    j rmw32_easrc
+    j rmw32_easrc_nocycfixup
 op_cmpa16_rmwimpl:
     lh_m68k t0, eaptr
     zx64 t0
     j op_cmp_rmwimpl
 
 OP(cmpm):
+    use_cycles 4
+    use_cycles_opmask 1<<7, 1<<7, 8   # cycle fixup for long size
     li opsize, 0                      # opsize not calculated yet
     andi t1, opcode, 7                # extract Ay*4 (needed for EA calculation)
     sll t1, 2
@@ -1328,8 +1486,10 @@ OP(cmpm):
     lax rmw_op, op_cmp_rmwimpl        
     j rmw_no_ea                       # do rmw
 
-
 OP(mul):
+    #if M64K_CONFIG_TIMING_ACCURACY == 0
+    use_cycles 50
+    #endif
     li opsize, 2
     jal decode_ea
     check_addr_error eaptr32, read_address_error
@@ -1345,11 +1505,45 @@ op_muls_exec:
     lh t1, 2(dptr)
     lh_m68k t0, eaptr
     mult t0, t1
+    #if M64K_CONFIG_TIMING_ACCURACY >= 1
+    sll t1, t0, 1
+    xor t0, t1                    # t0 = (t0<<1) ^ t0
+    andi t0, 0xFFFF               # (it now contains 1 on 0->1 transitions)
+    #endif
 op_mul_finish:
     mflo flag_nv
     zx64 flag_zc, flag_nv
     sw flag_nv, 0(dptr)
+    #if M64K_CONFIG_TIMING_ACCURACY < 1
     j main_loop
+    #else
+    use_cycles 38
+#if 0
+    j 3f                           # accurate algorihtm for timing
+    .set noreorder
+1:  use_cycles 2                   # add 2 cycles if LSB is 1
+    and t0, t1                     # clear last set bit
+3:  bnez t0, 1b                    # loop if more bits are set
+     addi t1, t0, -1
+    .set noreorder
+#else
+    sll t1, t0, 1                  # optimized popcount algorithm
+    andi t0, 0x5555<<1             # from Bit Twiddling Hacks
+    sub t0, t1, t0                 # also tweaked to count twice the population
+    srl t1, t0, 2
+    andi t1, 0x3333<<1
+    andi t0, 0x3333<<1
+    add t0, t1
+    srl t1, t0, 4
+    add t0, t1
+    andi t0, 0x0F0F<<1
+    srl t1, t0, 8
+    add t0, t1
+    andi t0, 0xFF
+    sub m_cycles, t0
+#endif
+    j main_loop
+    #endif
 
 OP(div):
     li opsize, 2
@@ -1357,6 +1551,7 @@ OP(div):
     check_addr_error eaptr32, read_address_error
     jal decode_dptr
     andi t0, opcode, 1<<8
+    use_cycles 12
     bnez t0, op_divs_exec
 op_divu_exec:
     lw t1, 0(dptr)
@@ -1364,6 +1559,8 @@ op_divu_exec:
     #if M64K_CONFIG_DIVBYZERO
     beqz t0, exception_divbyzero
     #endif
+    sgt t3, t1, t0
+    li cycles_long, 100
     divu zero, t1, t0
     mflo t0
     and t2, t0, 0xFFFF
@@ -1374,6 +1571,8 @@ op_divs_exec:
     #if M64K_CONFIG_DIVBYZERO
     beqz t0, exception_divbyzero
     #endif
+    sgt t3, t1, t0
+    li cycles_long, 115
     div zero, t1, t0
     mflo t0
     sll t2, t0, 16
@@ -1385,6 +1584,10 @@ op_div_finish:
     sll flag_nv, t0, 16
     sh t1, 0(dptr)
     sh t0, 2(dptr)
+    .set noreorder
+    bnez t3, 1f
+    sub m_cycles, cycles_long
+1:  .set reorder
     j main_loop
 op_div_overflow:
     not32sx flag_nv
@@ -1394,6 +1597,7 @@ op_div_overflow:
 
 OP(group_logical):
     li opsize, 0
+    set_rmw_cyctable rmw_cyctable_logical
     jal_and_j decode_dptr, rmw
 
 OP(andi):
@@ -1464,6 +1668,7 @@ op_eor_rmwimpl:
 OP(not):
     srl t0, opcode, 6
     beq t0, 0b0100011011, op_mvtsr
+    set_rmw_cyctable rmw_cyctable_singleop
     lax rmw_op, op_not_rmwimpl
     j rmw_eadst
 op_not_rmwimpl:
@@ -1475,6 +1680,7 @@ op_not_rmwimpl:
 OP(neg):
     srl t0, opcode, 6
     beq t0, 0b0100010011, op_mvccr
+    set_rmw_cyctable rmw_cyctable_singleop
     lax rmw_op, op_neg_rmwimpl
     j rmw_eadst
 op_neg_rmwimpl:
@@ -1485,6 +1691,7 @@ op_neg_rmwimpl:
 OP(negx):
     srl t0, opcode, 6
     beq t0, 0b0100000011, op_mvfsr
+    set_rmw_cyctable rmw_cyctable_singleop
     lax rmw_op, op_negx_rmwimpl
     j rmw_eadst
 op_negx_rmwimpl:
@@ -1521,7 +1728,11 @@ asli_start:
     addi t2, -1          # if value is 0, it means 8
     andi t2, 7
     addi t2, 1
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    jal_and_j group_shifts_cycles, rmw_eadst
+    #else
     j rmw_eadst          # call RMW (note opsize=0 in OP(shifts)).
+    #endif
 
 OP(lsl): OP(lsr):
     andi t0, opcode, 1<<8
@@ -1552,12 +1763,26 @@ OP(roxl): OP(roxr):
     lax rmw_op, op_roxr_rmwimpl
     j group_shifts
 
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+group_shifts_cycles:
+    sub m_cycles, t2
+    sub m_cycles, t2
+group_shifts_cycles_nocount:
+    use_cycles 8
+    use_cycles_opmask 1<<7, 0, -2
+    jr ra
+    #endif
+
 group_shifts:
     srl t0, opcode, 7            # read source Dn register into t2; similar to decode_dptr,
     andi t0, 0x7<<2              #  but we use t2 instead so that we can reuse the impl
     lw_ctx t2, M64K_OFF_DREGS,t0 #  functions used by immediate shifts.
     andi t2, 63                  # mask the shift amount
-    j rmw_eadst                  # call RMW (note opsize=0 in OP(shifts))
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    jal_and_j group_shifts_cycles, rmw_eadst  # call RMW (note opsize=0 in OP(shifts))
+    #else
+    j rmw_eadst
+    #endif
 
 OP(lsl_rmwimpl): # t1=register, t2=shift amount
     dsllv result, t1, t2                # calculate extended result
@@ -1644,7 +1869,7 @@ OP(roxl_rmwimpl): # t1=register, t2=rotate amount
     andi result, opcode, 1<<8           # check rotate direction
     bnez result, 1f                     # if roxr, negate t2
     neg t2
-1:  addi opsize, 2                      # opsize = 9,17,31 for b,w,l
+1:  addi opsize, 2                      # opsize = 9,17,33 for b,w,l
     bgtz t2, 1f                         # adjust remainder if negative or zero
     add t2, opsize                      # t2 = 1..9 = shift-left amount 
 1:  sub t3, opsize, t2                  # t3 = 8..0 = shift-right amount
@@ -1661,6 +1886,9 @@ OP(aslm): OP(asrm):
     jal decode_ea                       # decode EA (note opsize=2 in OP(bits))
     check_addr_error eaptr32, read_address_error
     andi t1, opcode, 0x100
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    jal group_shifts_cycles_nocount
+    #endif
     lh_m68k t0, eaptr
     bnez t1, op_asl_ea_left
 op_asl_ea_right:
@@ -1682,6 +1910,9 @@ OP(lslm): OP(lsrm):
     jal decode_ea                       # decode EA (note opsize=2 in OP(bits))
     check_addr_error eaptr32, read_address_error
     andi t1, opcode, 0x100
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    jal group_shifts_cycles_nocount
+    #endif
     lhu_m68k t0, eaptr
     bnez t1, op_lsl_ea_left
 op_lsl_ea_right:
@@ -1703,6 +1934,9 @@ OP(rolm): OP(rorm):
     jal decode_ea                       # decode EA (note opsize=2 in OP(bits))
     check_addr_error eaptr32, read_address_error
     andi t1, opcode, 0x100
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    jal group_shifts_cycles_nocount
+    #endif
     lhu_m68k t0, eaptr
     bnez t1, op_rom_ea_left
 op_rom_ea_right:
@@ -1726,6 +1960,9 @@ OP(roxlm): OP(roxrm):
     jal decode_ea                       # decode EA (note opsize=2 in OP(bits))
     check_addr_error eaptr32, read_address_error
     andi t1, opcode, 0x100        # check rotate direction
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    jal group_shifts_cycles_nocount
+    #endif
     lhu_m68k t0, eaptr            # fetch memory operand
     andi flag_x, 1                # isolate input carry bit
     bnez t1, op_roxm_ea_left
@@ -1746,6 +1983,7 @@ op_roxm_finish:
     j main_loop
 
 OP(clr):
+    set_rmw_cyctable rmw_cyctable_singleop
     lax rmw_op, op_clr_rmwimpl
     j rmw_eadst                   # run rmw cycle (note: clr does a dummy read on 68000)
 op_clr_rmwimpl:
@@ -1758,6 +1996,8 @@ OP(tst):
     srl rmw_bitsize, opcode, 6
     andi rmw_bitsize, 3
     beq rmw_bitsize, 3, op_tas
+    set_rmw_cyctable rmw_cyctable_singleop
+    use_cycles 4
     jal decode_ea
     beqz rmw_bitsize, tst_byte
     check_addr_error eaptr32, read_address_error
@@ -1765,6 +2005,14 @@ OP(tst):
     beqz rmw_bitsize, tst_word
 tst_long:
     lw_m68k t0, eaptr
+    #if M64K_CONFIG_TIMING_ACCURACY >= 1
+    .set noreorder
+    .set noat
+    la $1, rmw_cyctable_singleop
+    beql rmw_cyctable, $1, 1f        # if rmw_cyctable wasn't changed...
+    sub m_cycles, 4                  # it is a EA-mem, so we need 4 more cycles for 32-bit accesses
+1:  .set reorder
+    #endif
     move flag_nv, t0
     zx64 flag_zc, t0
     j main_loop
@@ -1779,21 +2027,38 @@ tst_byte:
     sll flag_nv, flag_zc, 24
     j main_loop
 
+#if M64K_CONFIG_TIMING_ACCURACY >= 1
+cyc_movel_penalty:
+    use_cycles_opmask 6<<6, 0, -4      # if Ea-dst is Dn/An, then 4 cycles faster
+    use_cycles_opmask 6<<3, 0, -4      # if Ea-src is Dn/An, then 4 cycles faster
+cyc_move_penalty:
+    use_cycles_opmask 7<<6, 4<<6, -2      # -(An) in EA-dst is 2 cycle faster than expected
+    jr ra
+#endif
+
 OP(moveb):
-    li opsize, 1
-    jal decode_ea
-    lbu_m68k t0, eaptr
+    use_cycles 4
+    #if M64K_CONFIG_TIMING_ACCURACY >= 1
+    jal cyc_move_penalty
+    #endif
+    li opsize, 1                          # opsize is byte
+    jal decode_ea                         # decode source EA
+    lbu_m68k t0, eaptr                    # load source byte
     move result, t0
-    srl opcode, 3
-    srl t1, opcode, 6
+    srl opcode, 3                         # shift EA-dst-mode into EA-mode
+    srl t1, opcode, 6                     # extract EA-dst-reg
     andi t1, 7
-    jal decode_ea_customreg
-    sb_m68k result, eaptr
-    move flag_zc, result
-    sll flag_nv, flag_zc, 24
+    jal decode_ea_customreg               # decode EA-dst
+    sb_m68k result, eaptr                 # store byte
+    move flag_zc, result                  # affect Z, clear C
+    sll flag_nv, result, 24               # addect N, clear V
     j main_loop
 
 OP(movew):
+    use_cycles 4
+    #if M64K_CONFIG_TIMING_ACCURACY >= 1
+    jal cyc_move_penalty
+    #endif
     li opsize, 2
     jal decode_ea
     check_addr_error eaptr32, read_address_error
@@ -1812,6 +2077,10 @@ OP(movew):
     j main_loop
 
 OP(movel):
+    use_cycles 12
+    #if M64K_CONFIG_TIMING_ACCURACY >= 1
+    jal cyc_movel_penalty
+    #endif
     li opsize, 4
     jal decode_ea
     check_addr_error eaptr32, read_address_error
@@ -1838,6 +2107,7 @@ OP(movel):
     .set reorder
 
 OP(moveq):
+    use_cycles 4
     sll flag_nv, opcode, 24
     sra flag_nv, 24
     andi flag_zc, opcode, 0xFF
@@ -1870,6 +2140,7 @@ OP(movem_rm):  # reg -> mem
     andi t0, opcode, 7<<3
     beqz t0, op_ext
     andi t0, opcode, 1<<6                   # check if word/long
+    use_cycles 4
     beqz t0, movem_rm16                     # jump to 16 bit variant setup
     li opsize, 4                            # 32-bit variant: opsize is 4
     lax movem_op, movem_rm_impl_32          # 32-bit variant: implementation function
@@ -1881,6 +2152,7 @@ movem_rm16:
 
 OP(movem_mr): # mem -> reg
     andi t0, opcode, 1<<6                   # check if word/long
+    use_cycles 8
     beqz t0, movem_mr16                     # jump to 16 bit variant setup
     li opsize, 4
     lax movem_op, movem_mr_impl_32
@@ -1965,12 +2237,16 @@ movem_loop:                              # Main movem loop
 #endif
 
 movem_mr_end:
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    li rmw_cyctable, 0                      # Restore overwritten a3 register
+    #endif
     bltz ea_reg, main_loop                   # If no register writeback is needed, we are done
     addu eaptr32, eaptr, eaptr32_diff        # Calculate the new 32-bit address given the current pointer
     sw_ctx eaptr32, M64K_OFF_AREGS,ea_reg   # Write back the new address to the address register
     j main_loop
 
 movem_predecr:                               # Predecrement variant
+    use_cycles -2
     addu t0, eaptr32, opsize                 # Revert the predecrement in the address register
     sw_ctx t0, M64K_OFF_AREGS,t1            #  (beheavior specific of M68000)
     subu eaptr32_diff, t0, eaptr             # Calculate the difference between the 32-bit address and the pointer
@@ -1989,18 +2265,22 @@ movem_postincr:                              # Postincrement variant
 
 movem_mr_impl_16:
     lh_m68k t0, eaptr
+    use_cycles 4
     sw t0, 0(reg_ptr)
     jr ra
 movem_mr_impl_32:
     lw_m68k t0, eaptr
+    use_cycles 8
     sw t0, 0(reg_ptr)
     jr ra
 movem_rm_impl_16:
     lh result, 2(reg_ptr)
+    use_cycles 4
     sh_m68k result, eaptr
     jr ra
 movem_rm_impl_32:
     lw result, 0(reg_ptr)
+    use_cycles 8
     sw_m68k result, eaptr
     jr ra
 
@@ -2015,10 +2295,12 @@ movem_rm_impl_32:
 
 
 OP(mvfsr):
+    use_cycles_opmask 6<<3, 0, -2
     check_supervisor
     li opsize, 2
     jal decode_ea
     check_addr_error eaptr32, read_address_error
+    use_cycles 8
     jal flush_sr
     lh_m68k t0, eaptr               # dummy read before write
     move result, t1
@@ -2029,6 +2311,7 @@ OP(mvccr):
     li opsize, 2
     jal decode_ea
     check_addr_error eaptr32, read_address_error
+    use_cycles 12
     jal flush_sr
     lw_ctx t1, M64K_OFF_SR
     lhu_m68k t0, eaptr
@@ -2043,6 +2326,7 @@ OP(mvtsr):
     li opsize, 2
     jal decode_ea
     check_addr_error eaptr32, read_address_error
+    use_cycles 12
     jal flush_sr
     lhu_m68k t0, eaptr
     and t0, SR_MASK
@@ -2051,6 +2335,7 @@ OP(mvtsr):
 
 OP(rmw_sr_imm):
     andi t0, opcode, 1<<6           # check if the access is just to CCR or the full SR
+    use_cycles 20
     bnez t0, rmw_sr_full
     li rmw_srmask, CCR_MASK         # use CCR mask to only modify CCR bits
     j rmw_sr_start
@@ -2090,6 +2375,7 @@ op_eori_sr_impl:
     jr ra
 
 OP(ext):
+    use_cycles 4
     andi dptr, opcode, 7                 # extract dreg index
     sll dptr, 2
     andi t0, opcode, 1<<6                # opcode bit 6: 1=word, 0=byte
@@ -2110,6 +2396,7 @@ OP(swap):
     andi dptr, opcode, 7                 # extract dreg index
     sll dptr, 2
     la_ctx dptr, M64K_OFF_DREGS,dptr    # compute dreg address
+    use_cycles 4
     lh t0, 0(dptr)
     lh flag_nv, 2(dptr)
     sh t0, 2(dptr)
@@ -2118,6 +2405,7 @@ OP(swap):
     j main_loop
 
 OP(mvusp):
+    use_cycles 4
     check_supervisor
     andi t0, opcode, 8         # DR bit
     sll t1, opcode, 2          # Isolate register offset
@@ -2131,6 +2419,13 @@ mvusp_read:
     sw_ctx t2, M64K_OFF_AREGS,t1
     j main_loop
 
+#if M64K_CONFIG_TIMING_ACCURACY >= 1
+cyc_leapea_penalty:
+    use_cycles_opmask 7<<3, 6<<3, 2            # d(An,ix) takes 2 extra cycles
+    use_cycles_opmask 0b111111, 0b111011, 2    # d(PC,ix) takes 2 extra cycles
+    jr ra
+#endif
+
 OP(pea):
     andi t0, opcode, 1<<7
     bnez t0, op_movem_rm
@@ -2138,6 +2433,10 @@ OP(pea):
     beqz t0, op_nbcd
     andi t0, opcode, 0b111000
     beqz t0, op_swap
+    use_cycles 8
+    #if M64K_CONFIG_TIMING_ACCURACY >= 1
+    jal cyc_leapea_penalty
+    #endif
     li opsize, 2
     jal decode_ea
     lw_ctx t0, M64K_OFF_AREGS+7*4
@@ -2152,6 +2451,9 @@ OP(pea):
 OP(lea):
     andi t0, opcode, 1<<6
     beqz t0, op_chk
+    #if M64K_CONFIG_TIMING_ACCURACY >= 1
+    jal cyc_leapea_penalty
+    #endif
     li opsize, 2
     jal decode_ea
     srl t1, opcode, 7
@@ -2209,10 +2511,12 @@ OP(link):
     addiu m_pc, 2
     addu t1, t2     # SP += disp
     sw_ctx t1, M64K_OFF_AREGS+7*4
+    use_cycles 16
     j main_loop
 
 OP(unlk):
     lw t1, 0(t2)                         # read An
+    use_cycles 12
     sw_ctx t1, M64K_OFF_AREGS+7*4       # An -> SP
     jal pop32
     lwl t3, 0(t0)                        # read (SP)
@@ -2222,23 +2526,37 @@ OP(unlk):
 
 OP(jmp):
     jal decode_ea
+jmp_exec_cycles:
+    use_cycles 2
+    #if M64K_CONFIG_TIMING_ACCURACY >= 1
+    use_cycles_opmask 0b111000, 0b010000, 2
+    use_cycles_opmask 0b111111, 0b111001, -2
+    jal cyc_leapea_penalty
+    #endif
 jmp_exec:
     map_m68k m_pc, eaptr32             # map 32-bit target to host pointer
     subu t0, eaptr32, m_pc             # save new pc_diff
     sw t0, pc_diff
     check_addr_error eaptr32, pc_address_error
+    beq m_pc, 0xFF001FE2, idle_skip    
+    beq m_pc, 0xFFC18714, idle_skip    
+    j main_loop
+idle_skip:
+    li m_cycles, 0
     j main_loop
 
 OP(jsr):
+    use_cycles 8
     jal decode_ea
 jsr_exec:
     lw result, pc_diff
     addu result, m_pc
     jal push32
     sw_m68k result, t0
-    j jmp_exec
+    j jmp_exec_cycles
 
 OP(rts):
+    use_cycles 16
     jal pop32
     lwl eaptr32, 0(t0)
     lwr eaptr32, 3(t0)
@@ -2251,6 +2569,10 @@ OP(bsr):
     addiu m_pc, 2
     addiu t3, -2
 bsr_exec:
+    use_cycles 16
+    #if M64K_CONFIG_TIMING_ACCURACY >= 1
+    andi opcode, 0xFF00                # avoid timing adjustment made by jmp_exec_cycles later
+    #endif
     lw eaptr32, pc_diff                # calculate full 32bit branch target (using pc_diff)
     addu eaptr32, t3                   
     addu eaptr32, m_pc
@@ -2260,31 +2582,59 @@ OP(bcc):
     andi t0, opcode, 0xFF00
     beq t0, 0x6100, op_bsr
     lb t3, -1(m_pc)                    # fetch signed 8-bit displacement (from opcode)
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    li cycles_long, 8
+    #endif
     bnez t3, bcc_exec                  # if displacement is 0, there's a 16-bit displacement
 bcc_disp_16:
     lh t3, 0(m_pc)                     # fetch 16-bit displacement
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    li cycles_long, 12
+    #endif
     addiu m_pc, 2                      # increment PC
     addiu t3, -2                       # displacement refers to PC before increment
 bcc_exec:
     jal check_cc
-    beqz t0, main_loop                 # cc is false => branch is not taken
+    .set noreorder
+    beqzl t0, main_loop                # cc is false => branch is not taken
+     #if M64K_CONFIG_TIMING_ACCURACY >= 0
+     sub m_cycles, cycles_long
+     #else
+     nop
+     #endif
+    .set reorder
 branch_exec:
     lw eaptr32, pc_diff                # calculate full 32bit branch target (using pc_diff)
     addu eaptr32, t3                   
     addu eaptr32, m_pc
+    use_cycles 10
     j jmp_exec
 
 OP(dbcc):
     addiu m_pc, 2
     jal check_cc
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    .set noreorder
+    bnezl t0, main_loop
+     use_cycles 12
+    .set reorder
+    #else
     bnez t0, main_loop
+    #endif
     andi t0, opcode, 0x7
     sll t0, 2
     la_ctx dptr, M64K_OFF_DREGS,t0
     lhu t0, 2(dptr)
     addiu t1, t0, -1
     sh t1, 2(dptr)
+    #if M64K_CONFIG_TIMING_ACCURACY >= 0
+    .set noreorder
+    beqzl t0, main_loop
+     use_cycles 14
+    .set reorder
+    #else
     beqz t0, main_loop
+    #endif
     lh t3, -2(m_pc)
     addiu t3, -2
     j branch_exec
@@ -2298,6 +2648,18 @@ OP(scc):
     jal check_cc
     neg result, t0                     # convert 0x01 into 0xFF
     sb_m68k result, eaptr              # store result
+    #if M64K_CONFIG_TIMING_ACCURACY >= 1
+    .set noreorder
+    andi t0, opcode, 0b110000          # check EA mode (register Dn/An)
+    bnezl t0, main_loop                # if EA is not register direct
+     use_cycles 8                      #  go back to main loop with 8 cycles (fixed)
+    bltzl result, main_loop            # if result is negative ("true")
+     use_cycles 6                      #  go back to main loop with 6 cycles (fixed)
+    .set reorder
+    use_cycles 4                       # if result is positive, use 4 cycles
+    #else
+    use_cycles 6                       # use an approximated average of 6 cycles among all cases
+    #endif
     j main_loop
 
     .section .sdata
@@ -2360,7 +2722,7 @@ cc_gt: # greater than (N == V && Z == 0)
 
 OP(reset):
     check_supervisor
-    addiu m_cycles, -128
+    use_cycles 132
     li t0, M64K_PENDINGEXC_RSTO
     sw_ctx t0, M64K_OFF_PENDINGEXC     # exit with code M64K_PENDINGEXC_RSTO
     j main_loop_exit
@@ -2372,6 +2734,7 @@ op_rte:
     li rmw_srmask, SR_MASK
     check_supervisor
 rte_exec:
+    use_cycles 20
     li t0, 6                            # pop 6 bytes from the stack
     jal popn
     move eaptr, t0                      # store pointer to frame in eaptr
@@ -2387,9 +2750,11 @@ rte_exec:
     jal_and_j reload_sr, jmp_exec       # reload flags/A7 using SR, and then jump to new PC
 
 OP(trap):
+    use_cycles 4
     andi eaptr32, opcode, 0xF
     addi eaptr32, 32
 trap:
+    use_cycles 30
     jal flush_sr
     ori t1, SR_SUPERV
     sw_ctx t1, M64K_OFF_SR
@@ -2414,6 +2779,7 @@ trap:
     j jmp_exec
 
 OP(trapv):
+    use_cycles 4
     li t2, 0
     jal cc_vc
     bnez t0, main_loop
@@ -2424,6 +2790,7 @@ OP(trapv):
 OP(bitsr):  # bit operation using a register as index
     jal_and_j decode_dptr, op_bits_start
 op_bitsi:   # bit operation using immediate value as index
+    use_cycles 4
     addi dptr, m_pc, -2
     addiu m_pc, 2
 op_bits_start:
@@ -2432,28 +2799,41 @@ op_bits_start:
     beq t0, 0<<3, op_bits_dreg   # check if EA mode is Dn
     beq t0, 1<<3, op_movep       # check if EA mode is An => movep
 op_bits_ea:
+    use_cycles_opmask 0b1111111, 0b0111100, 2  # Adjust BTST+BCLR: 2 cycles more when EA is #<data>
     li bitidx_mask, 7            # standard EA: 8-bit operation
     li opsize, 1
     jal_and_j decode_ea, rmw8_eadst
 op_bits_dreg:
+    use_cycles_opmask 1<<6, 0, 2               # Adjust BTST+BCLR: 2 cycles more when using a register
     li bitidx_mask, 31           # EA is Dn: 32-bit operation
     li opsize, 4
     jal_and_j decode_ea, rmw32_eadst
 bits_impl:  # First part is common to all bit operations
+    use_cycles 8
     lax rmw_op, bittable         # load bittable pointer
     srl t2, opcode, 3            # extract bitop from opcode, multiplied by 8
     andi t2, 3<<3                # (0=btst, 8=bchg, 16=bclr, 24=bset)
     add rmw_op, t2               # calculate bitop pointer
-    dsll t2, zx64_mask, 32       # t2 = ffffffff00000000
-    and flag_zc, t2              # isolate C flag
+    dsrl flag_zc, 32             # isolate C flag (clear bits of Z)
+    dsll flag_zc, 32
     and t0, bitidx_mask          # mask bit index (either 0..7 o 0..31)
+    #if M64K_CONFIG_TIMING_ACCURACY >= 1
+    .set noreorder
+    beqz t2, 1f                  # do nothing if opcode is btst
+     li t2, 1
+    beq opsize, t2, 1f           # do nothing if opsize is 8-bit (aka: EA access)
+     li t2, 16
+    bltl t0, t2, 1f              # if bitindex < 16
+     use_cycles -2               # bchg/bclr/bset: 2 cycles less if bitindex < 16
+1:  .set reorder
+    #endif
     li t2, 1                        
     sllv t2, t2, t0              # t2 = 1 << bitindex
     and t3, t2, t1               # t3 = value & (1 << bitindex)
     or flag_zc, t3               # set Z flag with current bit value
     jr rmw_op                    # jump to bitop function
 bittable:
-    nop                          # btst: no writeback necessary
+    use_cycles -4                # btst: no writeback necessary
     j main_loop            
     xor result, t1, t2           # bchg: result = value ^ (1 << bitindex)
     jr ra
@@ -2464,6 +2844,7 @@ bittable:
     #undef bitmask
 
 OP(movep): # NTOE: dptr was already decoded in op_bits
+    use_cycles 8
     xori opcode, 1<<5            # convert EA mode to (d16,An)
     andi t0, opcode, 1<<6        # check size bit
     li opsize, 4                 #  bit 6 = 1 => 32-bit operation
@@ -2485,6 +2866,7 @@ movep_wreg:
     sb t0, 2(dptr)
     lb t0, 6(eaptr)              
     sb t0, 3(dptr)
+    use_cycles 8
     j main_loop
 movep_wmem:
     lbu result, 0(dptr)          # read register
@@ -2497,11 +2879,13 @@ movep_wmem:
     sb result, 4(eaptr)
     lbu result, 3(dptr)
     sb result, 6(eaptr)
+    use_cycles 8
     j main_loop
 
 OP(exg):
     andi t0, opcode, 3<<6
     beqz t0, op_abcd
+    use_cycles 6
     jal decode_dptr
     li opsize, 4
     jal decode_ea
@@ -2516,6 +2900,8 @@ op_exg_start:
     j main_loop
 
 OP(tas):
+    use_cycles 10
+    use_cycles_opmask 7<<3, 0<<3, -6
     li opsize, 1                       # TAS is always 8-bit
     lax rmw_op, op_tas_rmwimpl
     jal_and_j decode_ea, rmw8_eadst    # decode the EA and run RMW
@@ -2528,6 +2914,11 @@ op_tas_rmwimpl:
     #endif
     ori result, t1, 0x80               # writeback value: set bit 7
     jr ra
+
+OP(nop):
+    use_cycles 4
+    j main_loop
+
 
 op_unk:
 # 68000+ instructions

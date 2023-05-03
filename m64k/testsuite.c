@@ -73,6 +73,9 @@ void read_state(FILE *f, test_state_t *s)
     }
 }
 
+int total_cycle_total = 0;
+int total_cycle_diff = 0;
+
 void run_testsuite(const char *fn)
 {
     debugf("Running testsuite: %s\n", fn);
@@ -81,6 +84,13 @@ void run_testsuite(const char *fn)
     bool asl_test = strstr(fn, "ASL.b.") != NULL;
     bool asr_test = strstr(fn, "ASR.") != NULL;
 
+    // We don't have cycle accurate timing for some tests
+    bool approx_timing = (M64K_CONFIG_TIMING_ACCURACY <= 0);
+    if (!approx_timing) {
+        if (strstr(fn, "DIVU") || strstr(fn, "DIVS"))
+            approx_timing = true;
+    }
+
     // Read ID
     char id[4]; fread(id, 1, 4, f); (void)id;
     assert(id[0] == 'M' && id[1] == '6' && id[2] == '4' && id[3] == 'K');
@@ -88,6 +98,8 @@ void run_testsuite(const char *fn)
     // Read number of tests
     uint32_t num_tests; fread(&num_tests, 1, 4, f);
 
+    int cycle_total = 0;
+    int cycle_diff = 0;
     for (int t=0; t<num_tests; t++) {
         fread(id, 1, 4, f);
         assert(id[0] == 'T' && id[1] == 'E' && id[2] == 'S' && id[3] == 'T');
@@ -102,6 +114,8 @@ void run_testsuite(const char *fn)
         // skip buggy tests
         // see https://github.com/TomHarte/ProcessorTests/issues/21
         if (asl_test && (t == 1583-1 || t == 1761-1)) continue;
+        // if (t!=31-1) continue;
+        // debugf("Running test: %s\n", name);
 
         // Run the test
         m64k_t m64k;
@@ -113,6 +127,7 @@ void run_testsuite(const char *fn)
         m64k.pc = initial.pc;
         m64k.sr = initial.sr;
 
+        bool address_error = false;
         m68k_ram_init();
         m68k_ram_w8(initial.pc+0, initial.prefetch[0] >> 8);
         m68k_ram_w8(initial.pc+1, initial.prefetch[0] & 0xff);
@@ -122,6 +137,7 @@ void run_testsuite(const char *fn)
             uint32_t addr = initial.ram[i][0];
             uint32_t value = initial.ram[i][1];
             m68k_ram_w8(addr, value);
+            if (addr == 0xC) address_error = true;
             // debugf("RAM[%08lx] = %02lx\n", addr, value);
         }
         // Make sure also locations mentioned in final state are mapped
@@ -129,7 +145,7 @@ void run_testsuite(const char *fn)
             (void)m68k_ram_r8(final.ram[i][0]);
 
         // Run the opcode
-        m64k_run(&m64k, 1);
+        int elapsed_cycles = m64k_run(&m64k, 1);
 
         // Check the results
         bool failed = false;
@@ -180,7 +196,33 @@ void run_testsuite(const char *fn)
             }
         }
 
-        if (failed) abort();
+        if (failed) {
+            if (address_error) debugf("(this test is designed to trigger an address error)\n");
+            abort();
+        }
+
+        // Check cycle count difference
+        if (M64K_CONFIG_TIMING_ACCURACY >= 0 && !address_error) {
+            if (!approx_timing) {
+                if (elapsed_cycles != cycles) {
+
+                    debugf("Running test: %s\n", name);
+                    debugf("Cycle count: %d != %ld\n", elapsed_cycles, cycles);
+                    abort();
+                }
+            } else {
+                cycle_total += cycles;
+                int diff = elapsed_cycles - cycles;
+                if (diff < 0) diff = -diff;
+                cycle_diff += diff;
+            }
+        }
+    }
+    
+    if (M64K_CONFIG_TIMING_ACCURACY >= 0 && approx_timing) {
+        total_cycle_total += cycle_total;
+        total_cycle_diff += cycle_diff;
+        debugf("Cycle count difference: %.2f%%\n", (double)cycle_diff * 100.0 / cycle_total);
     }
 
     fclose(f);
@@ -381,4 +423,7 @@ int main()
     }
 
     debugf("Finished testsuite\n");
+    if (M64K_CONFIG_TIMING_ACCURACY == 0) {
+        debugf("TOTAL: Cycle count difference: %.2f%%\n", (double)total_cycle_diff * 100.0 / total_cycle_total);
+    }
 }
