@@ -11,6 +11,17 @@
 #define panic(s, ...) ({ fprintf(stderr, s, ##__VA_ARGS__); exit(1); })
 #define strstartwith(s, prefix) !strncmp(s, prefix, strlen(prefix))
 
+#define BIT(x,n) (((x)>>(n))&1)
+
+#define BITSWAP8(val,B7,B6,B5,B4,B3,B2,B1,B0) \
+	((BIT(val,B7) << 7) | (BIT(val,B6) << 6) | (BIT(val,B5) << 5) | (BIT(val,B4) << 4) | (BIT(val,B3) << 3) | (BIT(val,B2) << 2) | (BIT(val,B1) << 1) | (BIT(val,B0) << 0))
+#define BITSWAP16(val,B15,B14,B13,B12,B11,B10,B9,B8,B7,B6,B5,B4,B3,B2,B1,B0) \
+	((BIT(val,B15) << 15) | (BIT(val,B14) << 14) | (BIT(val,B13) << 13) | (BIT(val,B12) << 12) | (BIT(val,B11) << 11) | (BIT(val,B10) << 10) | (BIT(val, B9) <<  9) | (BIT(val, B8) <<  8) | (BIT(val, B7) <<  7) | (BIT(val, B6) <<  6) | (BIT(val, B5) <<  5) | (BIT(val, B4) <<  4) | (BIT(val, B3) <<  3) | (BIT(val, B2) <<  2) | (BIT(val, B1) <<  1) | (BIT(val, B0) <<  0))
+#define BITSWAP24(val,B23,B22,B21,B20,B19,B18,B17,B16,B15,B14,B13,B12,B11,B10,B9,B8,B7,B6,B5,B4,B3,B2,B1,B0) \
+	((BIT(val,B23) << 23) | (BIT(val,B22) << 22) | (BIT(val,B21) << 21) | (BIT(val,B20) << 20) | (BIT(val,B19) << 19) | (BIT(val,B18) << 18) | (BIT(val,B17) << 17) | (BIT(val,B16) << 16) | (BIT(val,B15) << 15) | (BIT(val,B14) << 14) | (BIT(val,B13) << 13) | (BIT(val,B12) << 12) | (BIT(val,B11) << 11) | (BIT(val,B10) << 10) | (BIT(val, B9) <<  9) | (BIT(val, B8) <<  8) | (BIT(val, B7) <<  7) | (BIT(val, B6) <<  6) | (BIT(val, B5) <<  5) | (BIT(val, B4) <<  4) | (BIT(val, B3) <<  3) | (BIT(val, B2) <<  2) | (BIT(val, B1) <<  1) | (BIT(val, B0) <<  0))
+#define BITSWAP32(val,B31,B30,B29,B28,B27,B26,B25,B24,B23,B22,B21,B20,B19,B18,B17,B16,B15,B14,B13,B12,B11,B10,B9,B8,B7,B6,B5,B4,B3,B2,B1,B0) \
+	((BIT(val,B31) << 31) | (BIT(val,B30) << 30) | (BIT(val,B29) << 29) | (BIT(val,B28) << 28) | (BIT(val,B27) << 27) | (BIT(val,B26) << 26) | (BIT(val,B25) << 25) | (BIT(val,B24) << 24) | (BIT(val,B23) << 23) | (BIT(val,B22) << 22) | (BIT(val,B21) << 21) | (BIT(val,B20) << 20) | (BIT(val,B19) << 19) | (BIT(val,B18) << 18) | (BIT(val,B17) << 17) | (BIT(val,B16) << 16) | (BIT(val,B15) << 15) | (BIT(val,B14) << 14) | (BIT(val,B13) << 13) | (BIT(val,B12) << 12) | (BIT(val,B11) << 11) | (BIT(val,B10) << 10) | (BIT(val, B9) <<  9) | (BIT(val, B8) <<  8) | (BIT(val, B7) <<  7) | (BIT(val, B6) <<  6) | (BIT(val, B5) <<  5) | (BIT(val, B4) <<  4) | (BIT(val, B3) <<  3) | (BIT(val, B2) <<  2) | (BIT(val, B1) <<  1) | (BIT(val, B0) <<  0))
+
 enum GameId {
 	GAME_MSLUG = 0x0201, GAME_SAMSHO = 0x0045, GAME_SENGOKU3 = 0x0261,
 	GAME_S1945P = 0x0254, GAME_AOF = 0x0044, GAME_AOF3 = 0x0096,
@@ -192,6 +203,25 @@ void cmc_decrypt(Game *g) {
 	g->crom_size -= g->srom_size;
 }
 
+void kof99_decrypt_prom(uint8_t *prom)
+{
+	uint16_t *rom = (uint16_t*)(prom + 1024*1024);
+
+	for (int i = 0; i < 0x800000/2; i++)
+		rom[i] = BITSWAP16(rom[i],13,7,3,0,9,4,5,6,1,12,8,14,10,11,2,15);
+
+	for (int i = 0; i < 0x600000/2; i+=0x800/2) {
+		uint16_t buffer[0x800/2];
+		memcpy(buffer, &rom[i], 0x800);
+		for (int j = 0; j < 0x800/2; j++)
+			rom[i+j] = buffer[BITSWAP24(j,23,22,21,20,19,18,17,16,15,14,13,12,11,10,6,2,4,9,8,3,1,7,0,5)];
+	}
+
+	rom = (uint16_t*)prom;
+	for (int i = 0; i < 0x0c0000/2; i++)
+		rom[i] = rom[0x700000/2 + BITSWAP24(i,23,22,21,20,19,18,11,6,14,17,16,5,8,10,12,0,4,3,2,7,9,15,13,1)];
+}
+
 void chfn(char *path, char* fn) {
 	int i = strlen(path);
 	while (--i >= 0) if (path[i] == '/' || path[i] == '\\') break;
@@ -269,10 +299,13 @@ int romset_count(Romset *r) {
 }
 
 #define ROMSET_LOAD_INTERLEAVE  1
+#define ROMSET_OFFSET_1MIB      2
 
 uint8_t* romset_load(Romset *r, mz_zip_archive *zip, int flags) {
 	int cnt = romset_count(r);
-	uint8_t *ROM = malloc(r->total_size);
+	int base = flags & ROMSET_OFFSET_1MIB ? 1024*1024 : 0;
+	uint8_t *ROM = malloc(r->total_size + base);
+	memset(ROM, 0, base);
 
 	int offset = 0;
 	for (int i=0;i<cnt;i++) {
@@ -281,10 +314,10 @@ uint8_t* romset_load(Romset *r, mz_zip_archive *zip, int flags) {
 			panic("%s\n", mz_zip_get_error_string(mz_zip_get_last_error(zip)));
 
 		if (flags & ROMSET_LOAD_INTERLEAVE) {
-			byteswap(ROM+offset+(i&1), 2, buf, 1, r->size[i]);
+			byteswap(ROM+base+offset+(i&1), 2, buf, 1, r->size[i]);
 			if (i&1) offset += r->size[i]*2;
 		} else {
-			memcpy(ROM+offset, buf, r->size[i]);
+			memcpy(ROM+base+offset, buf, r->size[i]);
 			offset += r->size[i];
 		}
 		free(buf);
@@ -311,11 +344,12 @@ void load_game(const char *fn, Game *game) {
 
 	if (!mz_zip_reader_init_file(&zip, fn, 0)) panic("%s\n", mz_zip_get_error_string(mz_zip_get_last_error(&zip)));
 
-	Romset P, C, S;
+	Romset P, C, S, X;
 
 	memset(&P, 0, sizeof(Romset));
 	memset(&C, 0, sizeof(Romset));
 	memset(&S, 0, sizeof(Romset));
+	memset(&X, 0, sizeof(Romset));
 
 	for (int index = 0;;index++) {
 		mz_zip_archive_file_stat stat;
@@ -331,6 +365,7 @@ void load_game(const char *fn, Game *game) {
 		if ((idx = romtype(fn, 'g'))) romset_add(&P, idx, &stat); // some PROMs are called pg1/pg2
 		if ((idx = romtype(fn, 's'))) romset_add(&S, idx, &stat);
 		if ((idx = romtype(fn, 'c'))) romset_add(&C, idx, &stat);
+		if (strstr(fn, "sma")) romset_add(&X, 1, &stat);
 	}
 
 	int num_croms = romset_count(&C);
@@ -343,18 +378,44 @@ void load_game(const char *fn, Game *game) {
 	int num_proms = romset_count(&P);
 	if (!num_proms) panic("error: no PROM files found\n");
 
+	int num_smas = romset_count(&X);
+	if (num_smas > 1) panic("error: invalid number of SMA files found: %d\n", num_smas);
+
 	// Load PROMs
-	game->PROM = romset_load(&P, &zip, 0);
-	byteswap(game->PROM, 2, game->PROM+1, 2, P.total_size/2);
-	game->prom_size = P.total_size;
+	if (num_smas == 0) {
+		game->PROM = romset_load(&P, &zip, 0);
+		byteswap(game->PROM, 2, game->PROM+1, 2, P.total_size/2);
+		game->prom_size = P.total_size;
 
-	// In some cases, the single PROM has the two halves inverted.
-	if (num_proms == 1) {
-		if (memcmp(game->PROM+P.total_size/2+0x100, "NEO-GEO", 7)==0)
-			byteswap(game->PROM, 1, game->PROM+P.total_size/2, 1, P.total_size/2);
+		// In some cases, the single PROM has the two halves inverted.
+		if (num_proms == 1) {
+			if (memcmp(game->PROM+P.total_size/2+0x100, "NEO-GEO", 7)==0)
+				byteswap(game->PROM, 1, game->PROM+P.total_size/2, 1, P.total_size/2);
+		}
+		if (memcmp(game->PROM+0x100, "NEO-GEO", 7)) panic("error: cannot detect PROM layout\n");
+	} else {
+		game->PROM = romset_load(&P, &zip, ROMSET_OFFSET_1MIB);
+
+		// Load SMA rom
+		if (X.size[0] != 0x40000) panic("error: invalid SMA size: %d\n", X.size[0]);
+		if (!mz_zip_reader_extract_file_to_mem(&zip, X.fn[0], game->PROM + 0x0C0000, X.size[0], 0))
+			panic("%s\n", mz_zip_get_error_string(mz_zip_get_last_error(&zip)));
+		
+		game->prom_size = P.total_size + 1024*1024;
+		byteswap(game->PROM, 2, game->PROM+1, 2, game->prom_size/2);
+
+		// Detect SMA rom
+		if (!memcmp(game->PROM+0x0C0FA7, "KOF'99", 6) || 1) {
+			kof99_decrypt_prom(game->PROM);
+			FILE *f = fopen("kof99.prom", "wb");
+			fwrite(game->PROM, 1, game->prom_size, f);
+			fclose(f);
+		} else {
+			panic("error: cannot detect SMA rom\n");
+		}
+
+		// if (memcmp(game->PROM+0x100, "NEO-GEO", 7)) panic("error: SMA PROM decryption failed\n");
 	}
-
-	if (memcmp(game->PROM+0x100, "NEO-GEO", 7)) panic("error: cannot detect PROM layout\n");
 
 	game->code = ((int)game->PROM[0x108] << 8) | game->PROM[0x109];
 
