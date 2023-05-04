@@ -65,6 +65,7 @@ static uint64_t g_clock, g_clock_framebegin;
 static uint64_t m68k_clock;
 static EmuEvent events[MAX_EVENTS];
 uint32_t hw_io_profile;
+uint32_t profile_hw_io;
 
 static uint64_t m68k_exec(uint64_t clock) {
 	clock /= M68K_CLOCK_DIV;

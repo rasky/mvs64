@@ -57,7 +57,7 @@ static void write_unk(uint32_t addr, uint32_t val, int sz) {
 	debugf("[MEM] unknown write%d: %06x <- %0*x\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val);
 }
 
-static int pbrom_bank = 0;
+uint32_t pbrom_bank = 0;
 
 void write_pbrom(uint32_t addr, uint32_t val, int sz) {
 	if (addr >= 0x2FFFF0 && addr <= 0x2FFFFF) {

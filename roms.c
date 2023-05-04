@@ -199,8 +199,8 @@ typedef struct {
 _Static_assert(sizeof(PBROMCacheEntry)*(1<<PBROM_LOOKUP_BITS) <= PB_ROM_SIZE, "PBROM cache too big");
 
 static bool pbrom_is_linear = false;
-static uint32_t pbrom_last_bank = 0xFFFFFFFF;
-static uint8_t *pbrom_last_mem = NULL;
+uint32_t pbrom_last_bank = 0xFFFFFFFF;
+uint8_t *pbrom_last_mem = NULL;
 
 void pbrom_init(const char *fn) {
 	PB_ROM = memalign(256*1024, PB_ROM_SIZE);
