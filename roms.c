@@ -204,6 +204,7 @@ static uint8_t *pbrom_last_mem = NULL;
 
 void pbrom_init(const char *fn) {
 	PB_ROM = memalign(256*1024, PB_ROM_SIZE);
+	assertf(PB_ROM, "cannot allocate PBROM buffer");
 	unsigned len;
 	#ifdef N64
 	if (pbrom_file != -1) dfs_close(pbrom_file);
@@ -227,6 +228,7 @@ void pbrom_init(const char *fn) {
 
 	if (len > PB_ROM_SIZE) {
 		pbrom_is_linear = false;
+		pbrom_cache_init();
 		return;
 	}
 
@@ -253,6 +255,15 @@ static bool fastrand_bool(void) {
 // Return the PBROM linear mapping area, or NULL in case PBROM is banked.
 uint8_t* pbrom_linear(void) {
 	return pbrom_is_linear ? PB_ROM : NULL;
+}
+
+void pbrom_cache_init(void) {
+	// Initialize pbrom cache
+	PBROMCacheEntry *cache = (PBROMCacheEntry *)PB_ROM;
+	for (int i=0; i < 1<<PBROM_LOOKUP_BITS; i++) {
+		cache[i].bank1 = 0xFFFFFFFF;
+		cache[i].bank2 = 0xFFFFFFFF;
+	}
 }
 
 // Lookup PBROM cache, loading data on demand.
@@ -352,6 +363,7 @@ void rom_next_frame(void) {
 
 void rom_load(const char *dir) {
 	P_ROM = memalign(256*1024, 1024*1024);
+	assertf(P_ROM, "cannot allocate P_ROM buffer");
 	rom(dir, "p.bios", 0, 0, BIOS, sizeof(BIOS), false);
 	rom(dir, "p.rom", 0, 0, P_ROM, P_ROM_SIZE, false);
 
