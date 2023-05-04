@@ -62,8 +62,8 @@ static m64k_t m64k;
 static uint64_t g_clock, g_clock_framebegin;
 static uint64_t m68k_clock;
 static EmuEvent events[MAX_EVENTS];
-uint32_t hw_io_profile;
 uint32_t profile_hw_io;
+uint32_t profile_dma_load;
 
 static uint64_t m68k_exec(uint64_t clock) {
 	clock /= M68K_CLOCK_DIV;
@@ -166,6 +166,19 @@ uint32_t emu_vblank_start(void* arg) {
 	return FRAME_CLOCK;
 }
 
+uint32_t render_time;
+
+uint32_t emu_render(void *arg) {
+	uint32_t t0 = TICKS_READ();
+	if (true || (g_frame & 1)) {
+		plat_beginframe();
+		video_render();
+		plat_endframe();
+	}
+	render_time = TICKS_DISTANCE(t0, TICKS_READ());
+	return FRAME_CLOCK;
+}
+
 void emu_run_frame(void) {
     uint64_t vsync = g_clock_framebegin + FRAME_CLOCK;
     EmuEvent *e;
@@ -230,10 +243,17 @@ int main(int argc, char *argv[]) {
 	#endif
 	m68k_clock = 0;
 
+	emu_add_event(LINE_CLOCK*24,  emu_render, NULL);
 	emu_add_event(LINE_CLOCK*248, emu_vblank_start, NULL);
 
-	for (int i=0;i<7000000;i++) {
-		hw_io_profile = 0;
+	#ifdef N64
+	uint32_t fps_frame = 0;
+	uint32_t fps_time = TICKS_READ();
+	#endif
+	while (1) {
+		render_time = 0;
+		profile_hw_io = 0;
+		profile_dma_load = 0;
 		#ifdef N64
 		uint32_t t0 = TICKS_READ();
 		#endif
@@ -241,21 +261,13 @@ int main(int argc, char *argv[]) {
 		if (!plat_poll()) break;
 
 		#ifdef N64
-		uint32_t emu_time = TICKS_READ();
-		#endif
+		uint32_t emu_time = TICKS_DISTANCE(t0, TICKS_READ());
 
-		// Draw the screen
-		plat_beginframe();
-		video_render();
-		plat_endframe();
-
-		#ifdef N64
-		uint32_t draw_time = TICKS_READ();
-
-		debugf("[PROFILE] cpu:%.2f%% io:%.2f%% draw:%.2f%% PC:%06lx\n",
-			(float)TICKS_DISTANCE(t0, emu_time) * 100.f / (float)(TICKS_PER_SECOND / 60),
-			(float)hw_io_profile * 100.f / (float)(TICKS_PER_SECOND / 60),
-			(float)TICKS_DISTANCE(emu_time, draw_time) * 100.f / (float)(TICKS_PER_SECOND / 60),
+		debugf("[PROFILE] cpu:%.2f%% io:%.2f%% draw:%.2f%% dma:%.2f%% PC:%06lx\n",
+			(float)emu_time * 100.f / (float)(TICKS_PER_SECOND / 60),
+			(float)profile_hw_io * 100.f / (float)(TICKS_PER_SECOND / 60),
+			(float)render_time * 100.f / (float)(TICKS_PER_SECOND / 60),
+			(float)profile_dma_load * 100.f / (float)(TICKS_PER_SECOND / 60),
 			#ifdef N64
 			m64k_get_pc(&m64k));
 			#else
@@ -264,6 +276,14 @@ int main(int argc, char *argv[]) {
 		#endif
 
 		rom_next_frame();
+		#ifdef N64
+		uint32_t curtime = TICKS_READ();
+		if (TICKS_DISTANCE(fps_time, curtime) > TICKS_FROM_MS(1000)) {
+			debugf("FPS: %.1f\n", (g_frame - fps_frame) * (float)TICKS_PER_SECOND / TICKS_DISTANCE(fps_time, curtime));
+			fps_frame = g_frame;
+			fps_time = curtime;
+		}
+		#endif
 	}
 
 	debugf("end\n");

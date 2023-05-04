@@ -23,6 +23,7 @@ uint8_t *PB_ROM;
 
 // Address to trigger idle-skipping
 unsigned int rom_pc_idle_skip = 0;
+extern uint32_t profile_dma_load;
 
 static SpriteCache srom_cache;
 static SpriteCache crom_cache;
@@ -59,9 +60,11 @@ uint8_t* srom_get_sprite(int spritenum) {
 	assertf(pix, "SROM cache is full");
 
 	#ifdef N64
+	profile_dma_load -= TICKS_READ();
 	dfs_seek(srom_file, spritenum*4*8, SEEK_SET);
 	dfs_read(pix, 1, 4*8, srom_file);
 	data_cache_hit_writeback_invalidate(pix, 4*8);    // FIXME: should not be required
+	profile_dma_load += TICKS_READ();
 	#else
 	fseek(srom_file, spritenum*4*8, SEEK_SET);
 	fread(pix, 1, 4*8, srom_file);
@@ -81,9 +84,11 @@ uint8_t* crom_get_sprite(int spritenum) {
 	assertf(pix, "CROM cache is full");
 
 	#ifdef N64
+	profile_dma_load -= TICKS_READ();
 	dfs_seek(crom_file, spritenum*8*16, SEEK_SET);
 	dfs_read(pix, 1, 8*16, crom_file);
 	data_cache_hit_writeback_invalidate(pix, 8*16);  // FIXME: should not be required
+	profile_dma_load += TICKS_READ();
 	#else
 	fseek(crom_file, spritenum*8*16, SEEK_SET);
 	fread(pix, 1, 8*16, crom_file);
