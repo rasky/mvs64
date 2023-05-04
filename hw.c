@@ -5,7 +5,7 @@
 #include "roms.h"
 #include "video.h"
 #include "emu.h"
-#if USE_M64K
+#ifdef N64
 #include "m64k/m64k.h"
 #else
 #include "m68k.h"
@@ -366,11 +366,7 @@ void hw_init(void) {
 	banks[0xD] = (Bank){ BACKUP_RAM,       0x0FFFF,   NULL,            write_unk };
 
 	#ifdef N64
-	#if USE_M64K
-		#define VBASE M64K_CONFIG_MEMORY_BASE
-	#else
-		#define VBASE 0
-	#endif
+	#define VBASE M64K_CONFIG_MEMORY_BASE
 
 	disable_interrupts();
 	tlb_init();
