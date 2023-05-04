@@ -168,8 +168,7 @@ uint32_t emu_vblank_start(void* arg) {
 }
 
 void emu_run_frame(void) {
-	g_clock_framebegin = g_clock;
-    uint64_t vsync = g_clock + FRAME_CLOCK;
+    uint64_t vsync = g_clock_framebegin + FRAME_CLOCK;
     EmuEvent *e;
 
     // Run all events that are scheduled before next vsync
@@ -192,6 +191,7 @@ void emu_run_frame(void) {
     // Frame completed
 	debugf("[EMU] Frame completed: %d (vsync: %llu)\n", g_frame, vsync);
     g_frame++;
+	g_clock_framebegin += FRAME_CLOCK;
 }
 
 int main(int argc, char *argv[]) {
