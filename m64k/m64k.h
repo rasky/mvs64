@@ -65,11 +65,97 @@ int64_t m64k_run(m64k_t *m64k, int64_t until);
  */
 void m64k_map_memory(m64k_t *m64k, uint32_t address, uint32_t size, void *ptr, bool writable);
 
+/**
+ * @brief Configure the fast MMIO handlers, written in assembly.
+ * 
+ * This function should be called to map assembly I/O handlers. These are handlers
+ * are potentially the fastest as they are quicker to call compared to C ones
+ * (fewer context switches are required). It is suggested to implement the
+ * most performance-critical I/O handlers in assembly, and the others in C
+ * (via #m64k_map_io).
+ * 
+ * Like the C handlers, there is no attempt at address decoding. The specified
+ * functions will be called for all addresses that are not otherwise mapped
+ * as memory (via #m64k_map_memory), and even for write accesses to read-only memory.
+ * 
+ * Assembly handlers are called with the following input registers:
+ * 
+ * - `k1`: 24-bit 68000 address accessed (upper 8 bits are guaranteed to be 0).
+ * - `t6`: for I/O write functions, this register will contain the 16-bit value
+ *         being written. In 8-bit I/O write functions, the 8-bit value is replicated
+ *         two times (just like it happens on the memory bus of a 68000).
+ * 
+ * These are the expected output registers:
+ * 
+ * - `k1`: must be cleared to 0 if the assembly handler did not handle the operation.
+ *         In this case, the C handler will be called as a fallback.
+ * - `t6`: for I/O read functions, this register should contain either the 16-bit
+ *         or 8-bit value being read.
+ * 
+ * Registers `k0`, `k1`, `t6` and `at` can be freely modified and destroyed.
+ * All other registers are reserved and should not be modified. If more registers
+ * are needed, it is possible to save them on the stack in slots from 40(sp) to
+ * 120(sp) which are free at the point of call.
+ * 
+ * After the handler is done, it can return to the caller using the standard
+ * `jr ra` instruction.
+ * 
+ * It is possible to register up to 4 handlers: read/write 8-bit and read/write
+ * 16-bit. If a handler is not needed, it can be set to NULL. Notice that
+ * 32-bit handlers are not supported as the 68000 only does 16-bit memory
+ * transactions. 32-bit operations are split into two subsequent 16-bit memory
+ * transactions (normally the high word / lower address first, but the actual
+ * order is opcode dependent).
+ * 
+ * @param m64k              The m68k context
+ * @param asm_io_read16     Pointer to the assembly I/O 16-bit read handler (can be NULL)
+ * @param asm_io_write16    Pointer to the assembly I/O 16-bit write handler (can be NULL)
+ * @param asm_io_read8      Pointer to the assembly I/O 8-bit read handler (can be NULL)
+ * @param asm_io_write8     Pointer to the assembly I/O 8-bit write handler (can be NULL)
+ * 
+ * @see #m64k_map_io
+ */
+void m64k_set_mmio_fast_handlers(m64k_t *m64k,
+    void *asm_io_read16, void *asm_io_write16,
+    void *asm_io_read8, void *asm_io_write8);
 
-typedef uint16_t (*m64k_ioread_t)(uint32_t address, int sz);
-typedef void (*m64k_iowrite_t)(uint32_t address, uint16_t value, int sz);
+/**
+ * @brief Configure the I/O handlers, written in C.
+ * 
+ * This function allows to configure the MMIO standard handlers that will be
+ * used by the core. These handlers are called for all addresses that are not
+ * otherwise mapped as memory (via #m64k_map_memory), and even for write accesses
+ * to read-only memory. No attempt at address decoding is made: the full address
+ * is passed to the handler.
+ * 
+ * There are two handlers: one for memory reads and one for memory writes. The
+ * handlers are called with the following parameters:
+ * 
+ * - `address`: 24-bit 68000 address accessed (upper 8 bits are guaranteed to be 0).
+ * - `value`: for I/O write functions, this parameter will contain the 16-bit value
+ *            being written. In 8-bit I/O writes, the 8-bit value is replicated
+ *            two times (just like it happens on the memory bus of a 68000).
+ * - `sz`: size of the access (either 1 or 2).
+ * 
+ * The read handler must return the 8-bit or 16-bit value read from the MMIO.
+ * 
+ * Calling the handlers is unfortunately a bit expensive as it requires a complex
+ * context switch from the optimized context in which the interpreter runs (most
+ * registers must be saved into the stack). For this reason, it is suggested
+ * to implement the most performance-critical I/O handlers in assembly, and
+ * register them using #m64k_set_mmio_fast_handlers. Fast handlers use
+ * a special ABI that is more efficient to call for the interpreter core.
+ * 
+ * @param m64k      The m68k context
+ * @param read      Pointer to the I/O read handler (can be NULL)
+ * @param write     Pointer to the I/O write handler (can be NULL)
+ * 
+ * @see #m64k_set_mmio_fast_handlers
+ */
+void m64k_set_mmio_handlers(m64k_t *m64k,
+    uint32_t (*read)(uint32_t address, int sz),
+    void (*write)(uint32_t address, uint32_t value, int sz));
 
-void m64k_map_io(m64k_t *m64k, uint32_t address, uint32_t size, m64k_ioread_t read, m64k_iowrite_t write);
 
 /**
  * @brief Stop the m68k execution.

@@ -3,6 +3,7 @@
 #include "cycles.h"
 #include <libdragon.h>
 #include <string.h>
+#include "tlb.h"
 
 #if M64K_CONFIG_LOG_EXCEPTIONS
 #define logexcf(...)    debugf(__VA_ARGS__)
@@ -58,6 +59,7 @@ void m64k_init(m64k_t *m64k)
 {
     memset(m64k, 0, sizeof(*m64k));
     m64k->sr = 0x2700;
+    __m64k_tlb_reset(); // FIXME: this clears all TLB entries
 }
 
 void m64k_pulse_reset(m64k_t *m64k)
@@ -208,4 +210,19 @@ void m64k_set_hook_irqack(m64k_t *m64k, int (*hook)(void *ctx, int level), void 
 {
     m64k->hook_irqack = hook;
     m64k->hook_irqack_ctx = ctx;
+}
+
+void m64k_map_memory(m64k_t *m64k, uint32_t address, uint32_t size, void *ptr, bool writable)
+{
+    assertf(address < 0x1000000, "address must be in the 24-bit range");
+    assertf((size & (size-1)) == 0, "size must be a power of 2");
+    assertf(size >= 0x1000, "size must be at least 4 KiB");
+
+    int flags = TLBF_OVERWRITE;
+    if (!writable)
+        flags |= TLBF_READONLY;
+
+    void *virt = (void*)(M64K_CONFIG_MEMORY_BASE | address);
+    uint32_t phys = PhysicalAddr(ptr);
+    __m64k_tlb_add(virt, size-1, phys, flags);
 }

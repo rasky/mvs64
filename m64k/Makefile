@@ -1,7 +1,7 @@
 BUILD_DIR=build
 include $(N64_INST)/include/n64.mk
 
-src = m64k.c testsuite.c
+src = m64k.c tlb.c testsuite.c
 asm = m64k_asm.S
 assets_xm = $(wildcard assets/*.xm)
 assets_wav = $(wildcard assets/*.wav)

@@ -4,22 +4,22 @@
 #include "m64k.h"
 #include "tlb.h"
 
+m64k_t m64k;
 uint8_t ram_pages[16][8192] alignas(8192);
 uint32_t ram_address[16];
 
 static void m68k_ram_init(void) {
     memset(ram_address, 0xFF, sizeof(ram_address));
-    tlb_init();
 }
 
 static void m68k_ram_w8(uint32_t addr, uint8_t v) {
-    uint32_t page = (addr & ~0x1FFF) | M64K_CONFIG_MEMORY_BASE;
+    uint32_t page = addr & ~0x1FFF;
 
     for (int i=0;i<16;i++) {
         if (ram_address[i] == 0xFFFFFFFF) {
             ram_address[i] = page;
             memset(ram_pages[i], 0, 8192);
-            tlb_map_area(i, (void*)page, 0x1FFF, PhysicalAddr(ram_pages[i]), true);
+            m64k_map_memory(&m64k, page, 8192, ram_pages[i], true);
         }
         if (ram_address[i] == page) {
             ram_pages[i][addr & 0x1FFF] = v;
@@ -30,7 +30,7 @@ static void m68k_ram_w8(uint32_t addr, uint8_t v) {
 }
 
 static uint8_t m68k_ram_r8(uint32_t addr) {
-    uint32_t page = (addr & ~0x1FFF) | M64K_CONFIG_MEMORY_BASE;
+    uint32_t page = addr & ~0x1FFF;
     for (int i=0;i<16;i++) {
         if (ram_address[i] == page) {
             return ram_pages[i][addr & 0x1FFF];
@@ -39,7 +39,7 @@ static uint8_t m68k_ram_r8(uint32_t addr) {
             ram_address[i] = page;
             memset(ram_pages[i], 0, 8192);
             // debugf("Mapping RAM page %d at %08lx\n", i, page);
-            tlb_map_area(i, (void*)page, 0x1FFF, PhysicalAddr(ram_pages[i]), true);
+            m64k_map_memory(&m64k, page, 8192, ram_pages[i], true);
             return 0;
         }
     }
@@ -118,7 +118,6 @@ void run_testsuite(const char *fn)
         // debugf("Running test: %s\n", name);
 
         // Run the test
-        m64k_t m64k;
         m64k_init(&m64k);
         memcpy(m64k.dregs, initial.dregs, sizeof(m64k.dregs));
         memcpy(m64k.aregs, initial.aregs, sizeof(m64k.aregs));
