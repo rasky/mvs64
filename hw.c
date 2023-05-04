@@ -418,4 +418,5 @@ void hw_init(void) {
 
 void hw_vblank(void) {
 	lspc_vblank();
+	watchdog_vblank();
 }
