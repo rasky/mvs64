@@ -1,6 +1,7 @@
 #include "platform.h"
 #include <memory.h>
 
+volatile int N64_FRAME = 0;
 uint32_t RSP_OVL_ID = 0;
 
 DEFINE_RSP_UCODE(rsp_video);
@@ -9,12 +10,17 @@ uint8_t keystate[256];
 
 extern char end __attribute__((section (".data")));
 
+static void vblank_handler(void) {
+    N64_FRAME++;
+}
+
 void plat_init(int audiofreq, int fps) {
 #ifdef __LIBDRAGON_DEBUG_H
     debug_init_isviewer();
     debug_init_usblog();
 #endif
     debugf("MVS64\n");
+    register_VI_handler(vblank_handler);
 
     char *heap_top = (char*)0x80000000 + get_memory_size() - 0x10000;
     char *heap_end = &end;
