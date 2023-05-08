@@ -19,7 +19,7 @@
 uint8_t *P_ROM;
 #define P_ROM_SIZE (1024*1024)
 uint8_t *PB_ROM;
-#define PB_ROM_SIZE  (1024*1024)
+#define PB_ROM_CACHE_SIZE  (1024*1024)
 
 // Address to trigger idle-skipping
 unsigned int rom_pc_idle_skip = 0;
@@ -201,20 +201,20 @@ typedef struct {
  	uint32_t bank2;
 } PBROMCacheEntry;
 
-_Static_assert(sizeof(PBROMCacheEntry)*(1<<PBROM_LOOKUP_BITS) <= PB_ROM_SIZE, "PBROM cache too big");
+// PBROM cache is limited to 1Mb to make it work on N64 without expansion pack
+_Static_assert(sizeof(PBROMCacheEntry)*(1<<PBROM_LOOKUP_BITS) <= PB_ROM_CACHE_SIZE, "PBROM cache too big");
 
 static bool pbrom_is_linear = false;
 uint32_t pbrom_last_bank = 0xFFFFFFFF;
 uint8_t *pbrom_last_mem = NULL;
 
 void pbrom_init(const char *fn) {
-	PB_ROM = memalign(256*1024, PB_ROM_SIZE);
-	assertf(PB_ROM, "cannot allocate PBROM buffer");
 	unsigned len;
 	#ifdef N64
-	if (pbrom_file != -1) dfs_close(pbrom_file);
+	if (pbrom_file < 0) dfs_close(pbrom_file);
 	pbrom_file = dfs_open(fn);
-	if (pbrom_file == -1) {
+	if (pbrom_file < 0) {
+		debugf("[PBROM] no PBROM detected\n");
 		pbrom_is_linear = true;
 		return;
 	}
@@ -231,11 +231,23 @@ void pbrom_init(const char *fn) {
 	fseek(pbrom_file, 0, SEEK_SET);
 	#endif
 
-	if (len > PB_ROM_SIZE) {
+	#ifdef N64
+	int mem_avail = get_memory_size();
+	#else
+	int mem_avail = 1024*1024; // on PC, simulate a 4Mb RDRAM so that we test the cache
+	#endif
+	int pbrom_avail = mem_avail - 3*1024*1024;
+
+	if (len > pbrom_avail) {
+		// The available memory isn't sufficient for PBROM. Switch to cache mode.
+		debugf("[PBROM] swapping activated, performance will be impacted (%s %d, req:%d avail:%d)\n", fn, pbrom_file, len, pbrom_avail);
 		pbrom_is_linear = false;
 		pbrom_cache_init();
 		return;
 	}
+
+	PB_ROM = memalign(512*1024, len);
+	assertf(PB_ROM, "cannot allocate PBROM buffer");
 
 	// We have enough RDRAM to fully load the PBROM file into RDRAM
 	// (aka linear mapping)
@@ -247,6 +259,7 @@ void pbrom_init(const char *fn) {
 	fclose(pbrom_file); pbrom_file = NULL;
 	#endif
 	pbrom_is_linear = true;
+	debugf("[PBROM] using linear mode\n");
 }
 
 static bool fastrand_bool(void) {
@@ -264,6 +277,9 @@ uint8_t* pbrom_linear(void) {
 
 void pbrom_cache_init(void) {
 	// Initialize pbrom cache
+	PB_ROM = malloc(PB_ROM_CACHE_SIZE);
+	assertf(PB_ROM, "cannot allocate PBROM cache");
+
 	PBROMCacheEntry *cache = (PBROMCacheEntry *)PB_ROM;
 	for (int i=0; i < 1<<PBROM_LOOKUP_BITS; i++) {
 		cache[i].bank1 = 0xFFFFFFFF;

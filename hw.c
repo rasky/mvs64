@@ -64,11 +64,18 @@ void write_pbrom(uint32_t addr, uint32_t val, int sz) {
 	if (addr >= 0x2FFFF0 && addr <= 0x2FFFFF) {
 		val &= 7;
 		pbrom_bank = val << 20;
+		// debugf("[CART] bankswitch %x <= %x (linear: %d)\n", (unsigned int)addr, (unsigned int)pbrom_bank, (bool)banks[0x2].mem);
 
 		// If the PBROM area linearly mapped, update the mapping.
-		if (banks[0x2].mem)
+		if (banks[0x2].mem) {
 			banks[0x2].mem = pbrom_linear() + val*0x100000;
-		// debugf("[CART] bankswitch %x <= %x\n", (unsigned int)addr, (unsigned int)pbrom_bank);
+			#ifdef N64
+			extern m64k_t m64k;
+			m64k_map_memory(&m64k, 0x200000, 0x080000, banks[0x2].mem+0x000000,     false);
+			m64k_map_memory(&m64k, 0x280000, 0x080000, banks[0x2].mem+0x080000,     false);
+			// m64k_map_memory_change(&m64k, pbrom_memid, banks[0x2].mem, false);
+			#endif
+		}
 		return;
 	}
 
