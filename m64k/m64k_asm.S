@@ -63,32 +63,33 @@ opshiftsmem:
 #define ALIGN(lbl)  .balign 32; lbl
 
 #define OP(x)       .balign 32; op_##x
-#define ctx          a0
-#define m_cycles     a1    // cycles to execute (NOTE: must be kept caller-saved register)
-#define mmap_mask    a2
+#define ctx          a0    // pointer to the CPU context (m64k_t*)
+#define m_cycles     a1    // cycles left to execute (NOTE: must be kept caller-saved register)
+#define mmap_mask    a2    // mask used by the map_m68k macro
 #if M64K_CONFIG_TIMING_ACCURACY >= 0
-#define rmw_cyctable a3    // pointer to the current cycletable, or small positive value for NULL
+#define rmw_cyctable a3    // RMW: pointer to the current cycletable, or small positive value for NULL
 #endif
 
-#define lax_base    v0
-#define zx64_mask   v1
+#define lax_base    v0     // base pointer used by lax macro
+#define zx64_mask   v1     // mask used by the zx64 macro
 
-#define opcode      s0
-#define eaptr       s1
-#define dptr        s2
-#define opsize      s4
-#define __________  s5    // NOTE: this is used in movem
-#define flag_nv     s6    // bit 31: N; bit 63: N^V
-#define flag_zc     s7    // bit 0..31: !Z; bit 32: C
-#define flag_x      s8    // bit 0: X
+#define opcode      s0     // current opcode being executed
+#define eaptr       s1     // effective address pointer (in N64 space)
+#define dptr        s2     // pointer to the other register in the opcode (in N64 space)
+#define opsize      s4     // size of the current instruction (1=byte, 2=word, 4=long, 0=not decoded yet)
+#define __________  s5     // unused (NOTE: this is used within movem)
+#define flag_nv     s6     // bit 31: N; bit 63: N^V
+#define flag_zc     s7     // bit 0..31: !Z; bit 32: C
+#define flag_x      s8     // bit 0: X
 
-#define eaptr32       t4
-#define m_pc          t5
-#define result        t6
-#define rmw_op        t7    // RMW pointer to implementation function
-#define rmw_bitsize   t8    // RMW bitsize value useful in flag calcuation (24, 16, 0)
-#define rmw_srmask    t8    // for SR RMWs, it contains the mask for SR bits to be written
+#define eaptr32       t4   // 32-bit effective address pointer (in m68k space)
+#define m_pc          t5   // pointer to the next instruction to fetch (in N64 space)
+#define result        t6   // RMW: result of the current opcode
+#define rmw_op        t7   // RMW: pointer to the implementation function
+#define rmw_bitsize   t8   // RMW: bitsize value useful in flag calcuation (24, 16, 0)
+#define rmw_srmask    t8   // for SR RMWs, it contains the mask for SR bits to be written
 
+# Calculate an address of a member field of the CPU context
 .macro la_ctx  reg, offset,base
     .ifnb \base
         .set noat
@@ -100,6 +101,7 @@ opshiftsmem:
     .endif
 .endm
 
+# Load the value of a member field of the CPU context
 .macro lw_ctx  reg, offset,base
     .ifnb \base
         .set noat
@@ -111,6 +113,7 @@ opshiftsmem:
     .endif
 .endm
 
+# Store the value of a member field of the CPU context
 .macro sw_ctx  reg, offset,base
     .ifnb \base
         .set noat
@@ -122,12 +125,14 @@ opshiftsmem:
     .endif
 .endm
 
+# Consume the specified number of cycles (if timing accuracy is enabled)
 .macro use_cycles cycles
     #if M64K_CONFIG_TIMING_ACCURACY >= 0
     addi m_cycles, -\cycles
     #endif
 .endm
 
+# Configure the current RMW cycle table (if timing accuracy is enabled)
 .macro set_rmw_cyctable table
     #if M64K_CONFIG_TIMING_ACCURACY >= 0
     la rmw_cyctable, \table
@@ -164,6 +169,10 @@ opshiftsmem:
 
 #define LAX_BASE_ADDR main_loop
 
+# "lax" macro. Load the address of a label into a register. This is similar to
+# "la", but it expands to a single opcode as we dedicate one register to hold
+# a base address, so all labels in the m64k code can be expressed as a 16-bit
+# offset from that base address.
 .macro lax reg, label
     addiu \reg, lax_base, \label - LAX_BASE_ADDR
 .endm
