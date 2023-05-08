@@ -15,35 +15,49 @@
 //    1: accurate timing. The execution time of each opcode is tested to be
 //       exact against known behaviour of the hardware (via the testsuite).
 //       This is the slowest configuration.
+#ifndef M64K_CONFIG_TIMING_ACCURACY
 #define M64K_CONFIG_TIMING_ACCURACY  0
+#endif
 
 // Set to 1 to emulate address exceptions. Address exceptions impact both
 // codesize and runtime, as all memory accesses need to be verified beforehand.
 // NOTE: exact timing of address errors is not emulated.
-#define M64K_CONFIG_ADDRERR        1
+#ifndef M64K_CONFIG_ADDRERR
+#define M64K_CONFIG_ADDRERR        0
+#endif
 
 // Set to 1 to emulate privilege violations. This exceptions are raised when
 // a privileged instruction (accessing SR) is executed in non-supervisor mode.
-#define M64K_CONFIG_PRIVERR        1
+#ifndef M64K_CONFIG_PRIVERR
+#define M64K_CONFIG_PRIVERR        0
+#endif
 
 // Set to 1 to emulate division by zero exception.
-#define M64K_CONFIG_DIVBYZERO      1
+#ifndef M64K_CONFIG_DIVBYZERO
+#define M64K_CONFIG_DIVBYZERO      0
+#endif
 
 // Set to 1 to emulate instructions that access memory across the
 // address space boundary (e.g. 0x00FFFFFF -> 0x00000000). The implementation
 // is not complete: specifically, it doesn't still handle single 32-bit 
 // accesses across the address space wrap-around (eg: 32-bit read at 0x00FFFFFE).
-#define M64K_CONFIG_ADDR_WRAP      1
+#ifndef M64K_CONFIG_ADDR_WRAP
+#define M64K_CONFIG_ADDR_WRAP      0
+#endif
 
 // Set to 1 to emulate the TAS instruction without writeback.
 // This is the actual behaviour on Sega Megadrive because of a hardware bug
 // in the board (the TAS memory transaction is not correctly supported), so
 // define to 1 if you want to emulate the Megadrive or a similarly broken hardware.
+#ifndef M64K_CONFIG_BROKEN_TAS
 #define M64K_CONFIG_BROKEN_TAS     0
+#endif
 
 // Set to 1 if you want m64k to log (via debugf) all unusual exceptions happening
 // during emulation: address errors, privilege violations, divisions by zero, etc.
 // This might be useful during the development phase.
+#ifndef M64K_CONFIG_LOG_EXCEPTIONS
 #define M64K_CONFIG_LOG_EXCEPTIONS 0
+#endif
 
 #endif // M64K_CONFIG_H
