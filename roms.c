@@ -382,11 +382,15 @@ void rom_next_frame(void) {
 	sprite_cache_tick(&crom_cache);
 }
 
-void rom_load(const char *dir) {
-	P_ROM = memalign(256*1024, 1024*1024);
+void rom_load_prom(const char *dir) {
+	if (!P_ROM) P_ROM = memalign(256*1024, 1024*1024);
 	assertf(P_ROM, "cannot allocate P_ROM buffer");
-	rom(dir, "p.bios", 0, 0, BIOS, sizeof(BIOS), false);
 	rom(dir, "p.rom", 0, 0, P_ROM, P_ROM_SIZE, false);
+}
+
+void rom_load(const char *dir) {
+	rom_load_prom(dir);
+	rom(dir, "p.bios", 0, 0, BIOS, sizeof(BIOS), false);
 
 	char ini[1024];
 	strcpy(ini, dir);

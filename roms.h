@@ -5,6 +5,7 @@ extern uint8_t *P_ROM;
 extern unsigned int rom_pc_idle_skip;
 
 void rom_load(const char *dir);
+void rom_load_prom(const char *dir);
 
 uint8_t* crom_get_sprite(int spritenum);
 uint8_t* srom_get_sprite(int spritenum);
