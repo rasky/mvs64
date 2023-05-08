@@ -12,10 +12,10 @@ typedef struct {
 	int num_buckets;                // number of hash table buckets (should be pow2)
 	int32_t cur_tick;               // current tick (frame counter)
 	int32_t tick_cutoff;            // tick which marks sprites old enough to remove with sprite_cache_pop                 
-	uint8_t *pixels;                // pixel memory (for all sprites)
-	SpriteCacheEntry **buckets;     // hash table buckets
-	SpriteCacheEntry *entries;      // all cache entries (one per sprite)
-	SpriteCacheEntry *free;         // list of free (unallocated) entries
+	uint8_t *sprites;               // pixel memory (for all sprites)
+	uint16_t *free_sprite_indices;
+	int num_sprites;				// number of sprites currently in cache
+	SpriteCacheEntry *buckets;      // hashtable of the sprite entries
 } SpriteCache;
 
 void sprite_cache_init(SpriteCache *c, int sprite_size, int max_sprites);

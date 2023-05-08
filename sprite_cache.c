@@ -7,16 +7,23 @@
 
 #ifdef N64
 #include <malloc.h>
+#define LOG(...)
 #else
 #define memalign(a, n)  malloc(n)
+#define malloc_uncached_aligned(a, n)  malloc(n)
+#define LOG printf
 #endif
+
+#define SPRITE_FREEIDX_SCALE    8
 
 // An entry of the sprite cache. This is an internal bookkeeping structure
 // used of keep track of cache allocations.
 typedef struct SpriteCacheEntry_s {
-	uint32_t key;
-	int32_t last_tick;
-	struct SpriteCacheEntry_s *next;
+	struct {
+		int last_tick : 8;
+		uint32_t key : 24;
+	};
+	uint8_t *sprite;
 }  SpriteCacheEntry;
 
 // Initialize a sprite cache that can hold up to max_sprites, each one
@@ -29,12 +36,11 @@ void sprite_cache_init(SpriteCache *c, int sprite_size, int max_sprites) {
 	// Allocate pixel data as 16-byte aligned memory. 8-byte alignment is sufficient
 	// to do direct DMA from cartridge ROM, but we force 16-byte as it costs virtually
 	// nothing and it also allows faster memory invalidations without writebacks.
-	c->pixels = memalign(16, sprite_size * max_sprites);
-	assertf(c->pixels, "memory allocation failed");
+	c->sprites = memalign(16, sprite_size * max_sprites);
+	assertf(c->sprites, "memory allocation failed");
 
-	// Allocate entries
-	c->entries = calloc(sizeof(SpriteCacheEntry), max_sprites);
-	assertf(c->entries, "memory allocation failed");
+	c->free_sprite_indices = malloc(sizeof(uint16_t) * max_sprites);
+	assertf(c->free_sprite_indices, "memory allocation failed");
 
 	// Compute number of buckets as next-next power of two of the maximum number of
 	// sprites. Notice that a bucket is just 32-bit of memory, so it makes sense
@@ -47,7 +53,7 @@ void sprite_cache_init(SpriteCache *c, int sprite_size, int max_sprites) {
 	c->num_buckets |= c->num_buckets >> 16;
 	c->num_buckets++;
 	c->num_buckets *= 2;
-	c->buckets = malloc(sizeof(SpriteCacheEntry*) * c->num_buckets);
+	c->buckets = malloc(sizeof(SpriteCacheEntry) * c->num_buckets);
 	assertf(c->buckets, "memory allocation failed");
 
 	sprite_cache_reset(c);
@@ -56,46 +62,104 @@ void sprite_cache_init(SpriteCache *c, int sprite_size, int max_sprites) {
 // Reset a sprite cache removing all cached entries.
 void sprite_cache_reset(SpriteCache *c) {
 	// Clear all the buckets
-	memset(c->buckets, 0, sizeof(SpriteCacheEntry*) * c->num_buckets);
+	memset(c->buckets, 0, sizeof(SpriteCacheEntry) * c->num_buckets);
+	c->num_sprites = 0;
 
-	// All entries should be in the free list.
-	c->free = &c->entries[0];
-	for (int i=0;i<c->max_sprites-1;i++)
-		c->entries[i].next = &c->entries[i+1];
+	// All sprite indices are in the free list
+	assert((c->sprite_size % SPRITE_FREEIDX_SCALE) == 0);
+	for (int i=0; i<c->max_sprites; i++)
+		c->free_sprite_indices[i] = i * c->sprite_size / SPRITE_FREEIDX_SCALE;
 }
 
 // Increment current tick for the cache. This is used for marking cache entries
 // as recently used for LRU calculation. Can be incremented every frame.
 void sprite_cache_tick(SpriteCache *c) {
 	c->cur_tick++;
-	c->tick_cutoff = c->cur_tick-1;
+	c->tick_cutoff = c->cur_tick-4;
+	sprite_cache_pop(c);
 }
 
-static SpriteCacheEntry** bucket_ptr(SpriteCache *c, uint32_t key) {
-	int bidx = (key*2654435761) & (c->num_buckets-1);
-	return &c->buckets[bidx];
-}
-
-uint8_t* entry_pixels(SpriteCache *c, SpriteCacheEntry *e) {
-	int entry_idx = e - c->entries;
-	return c->pixels + entry_idx * c->sprite_size;
+static uint32_t hash(uint32_t key) {
+	key = key * 2654435761;
+	key ^= key >> 16;
+	return key;
 }
 
 // Lookup a sprite in the cache given its key. Return the pixel data, or NULL
 // if the sprite is not found.
 uint8_t* sprite_cache_lookup(SpriteCache *c, uint32_t key) {
-	// Go through the connected entries looking for the one with the specified key.
-	SpriteCacheEntry *e = *bucket_ptr(c, key);
-	while (e) {
-		if (e->key == key) {
-			e->last_tick = c->cur_tick;
-			return entry_pixels(c, e);
+	assertf(!(key >> 24), "key must be 24-bit");
+	int bidx = hash(key) & (c->num_buckets-1);
+
+	// Check if it's the correct entry
+
+	int dist = 0;
+	while (1) {
+		SpriteCacheEntry *b = &c->buckets[bidx];
+		if (b->key == key && b->sprite) {
+			b->last_tick = c->cur_tick;
+			return b->sprite;
 		}
-		e = e->next;
+		
+		int desired = hash(b->key) & (c->num_buckets-1);
+		int cur_dist = (bidx + c->num_buckets - desired) & (c->num_buckets-1);
+		if (cur_dist < dist)
+			return NULL;
+
+		dist++;
+		bidx = (bidx + 1) & (c->num_buckets-1);
+	}
+}
+
+// Insert a sprite in the cache, given its key.
+uint8_t* sprite_cache_insert(SpriteCache *c, uint32_t key) {
+	assertf(!(key >> 24), "key must be 24-bit");
+
+	if (c->num_sprites == c->max_sprites) {
+		LOG("[CACHE] cache full (%d/%d)\n", c->num_sprites, c->max_sprites);
+		do {
+			assert(c->tick_cutoff < c->cur_tick);
+			c->tick_cutoff++;
+			sprite_cache_pop(c);
+		} while (c->num_sprites == c->max_sprites);
 	}
 
-	// No matching entry found
-	return NULL;
+	int free_sidx = c->free_sprite_indices[c->max_sprites - c->num_sprites - 1];
+	uint8_t *sprite = c->sprites + free_sidx * SPRITE_FREEIDX_SCALE;
+	SpriteCacheEntry newb = (SpriteCacheEntry){
+		.key = key,
+		.sprite = sprite,
+		.last_tick = c->cur_tick,
+	};
+	c->num_sprites++;
+
+	int bidx = hash(key) & (c->num_buckets-1);
+	int dist = 0;
+	while (1) {
+		SpriteCacheEntry *b = &c->buckets[bidx];
+
+		if (b->sprite == NULL) {
+			// Found an empty slot, use it
+			*b = newb;
+			return sprite;
+		}
+
+		// Check the distance of this slot from its optimal position
+		int desired = hash(b->key) & (c->num_buckets-1);
+		int cur_dist = (bidx + c->num_buckets - desired) & (c->num_buckets-1);
+
+		if (cur_dist < dist) {
+			// This slot is closer to its optimal position than the new
+			// entry, so we can swap them.
+			SpriteCacheEntry tmp = *b;
+			*b = newb;
+			newb = tmp;
+			dist = cur_dist;
+		}
+
+		dist++;
+		bidx = (bidx + 1) & (c->num_buckets-1);
+	}
 }
 
 // Remove one or more sprites from the cache, with a pseudo-LRU approach:
@@ -105,66 +169,25 @@ uint8_t* sprite_cache_lookup(SpriteCache *c, uint32_t key) {
 // status.
 void sprite_cache_pop(SpriteCache *c) {
 	int bidx = rand() & (c->num_buckets-1);
-	bool removed_one = false;
 
-	// Go through all buckets, starting from a random one, until we managed
-	// to remove at least one entry.
-	for (int i=0;i<c->num_buckets && !removed_one;i++) {
-		SpriteCacheEntry** bkt = &c->buckets[bidx];
-
-		// Go through the current bucket, and remove all entries that
-		// are older than the cutoff value (currently, entries that are 2
-		// ticks older than the current tick).
-		// We go through the while bucket to amortize the cost of removal.
-		while (*bkt) {
-			if ((*bkt)->last_tick < c->tick_cutoff) {
-				SpriteCacheEntry *e = *bkt;
-
-				// Disconnect the entry from the bucket list
-				*bkt = e->next;
-
-				// Add the entry to the free list
-				e->next = c->free;
-				c->free = e;
-				removed_one = true;
-			} else {
-				// The current entry is too new, go to the next one
-				bkt = &(*bkt)->next;
-			}
+	int cutoff = c->cur_tick - c->tick_cutoff;
+	int n = 0;
+	int target = c->max_sprites / 3 * 2;
+	LOG("[CACHE] pop target %d => %d\n", c->num_sprites, target);
+	while (c->num_sprites > target && n < c->num_buckets) {
+		SpriteCacheEntry *b = &c->buckets[bidx];
+		if (b->sprite && ((c->cur_tick & 0xFF) - b->last_tick) > cutoff) {
+			// Found an entry that is older than the cutoff, remove it
+			int sprite_idx = (b->sprite - c->sprites) / SPRITE_FREEIDX_SCALE;
+			c->free_sprite_indices[c->max_sprites - c->num_sprites] = sprite_idx;
+			c->num_sprites--;
+			b->sprite = NULL;
+			LOG("[CACHE] evicted (tick:%d cutoff:%d)\n", (int)b->last_tick, (int)c->tick_cutoff);
+			bidx = rand() & (c->num_buckets-1);
 		}
 
-		bidx = (bidx+1) & (c->num_buckets-1);
+		n++;
+		bidx = (bidx + 1) & (c->num_buckets-1);
 	}
-
-	if (!removed_one && c->tick_cutoff <= c->cur_tick)
-	{
-		c->tick_cutoff++;
-		sprite_cache_pop(c);
-		return;
-	}
-}
-
-// Insert a sprite in the cache, given its key; if the cache is full, sprite_cache_pop
-// is automatically invoked to free space. The function returns the pointer
-// to the available pixel data that can be filled, or NULL if the cache is full
-// and all sprites were recently used.
-uint8_t* sprite_cache_insert(SpriteCache *c, uint32_t key) {
-	if (!c->free) {
-		sprite_cache_pop(c);
-		if (!c->free)
-			return NULL;
-	}
-
-	SpriteCacheEntry *e = c->free;
-	c->free = e->next;
-
-	e->key = key;
-	e->last_tick = c->cur_tick;
-
-	// Add the entry to the correct bucket (top of the list)
-	SpriteCacheEntry **bkt = bucket_ptr(c, key);
-	e->next = *bkt;
-	*bkt = e;
-
-	return entry_pixels(c, e);
+	LOG("[CACHE] pop end %d\n", c->num_sprites);
 }
