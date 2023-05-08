@@ -20,7 +20,7 @@
 // used of keep track of cache allocations.
 typedef struct SpriteCacheEntry_s {
 	struct {
-		int last_tick : 8;
+		uint8_t last_tick : 8;
 		uint32_t key : 24;
 	};
 	uint8_t *sprite;
@@ -176,7 +176,7 @@ void sprite_cache_pop(SpriteCache *c) {
 	LOG("[CACHE] pop target %d => %d\n", c->num_sprites, target);
 	while (c->num_sprites > target && n < c->num_buckets) {
 		SpriteCacheEntry *b = &c->buckets[bidx];
-		if (b->sprite && ((c->cur_tick & 0xFF) - b->last_tick) > cutoff) {
+		if (b->sprite && (uint8_t)((c->cur_tick & 0xFF) - b->last_tick) > cutoff) {
 			// Found an entry that is older than the cutoff, remove it
 			int sprite_idx = (b->sprite - c->sprites) / SPRITE_FREEIDX_SCALE;
 			c->free_sprite_indices[c->max_sprites - c->num_sprites] = sprite_idx;
