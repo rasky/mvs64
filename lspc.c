@@ -46,7 +46,6 @@ static uint16_t lspc_mode_r() {
 
 static void lspc_mode_w(uint16_t val) {
 	reg_lspcmode = val;
-	debugf("[LSPC] mode: %02x\n", val);
 
 	if (val & (1<<4))
 		debugf("[LSPC] Timer interrupt **************************\n");
