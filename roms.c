@@ -48,7 +48,7 @@ static unsigned int srom_num_tiles;
 
 static void rom_cache_init(void) {
 	sprite_cache_init(&srom_cache, 4*8, 256);
-	sprite_cache_init(&crom_cache, 8*16, 768);
+	sprite_cache_init(&crom_cache, 8*16, 1280);
 }
 
 uint8_t* srom_get_sprite(int spritenum) {
