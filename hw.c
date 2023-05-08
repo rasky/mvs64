@@ -63,6 +63,8 @@ uint32_t pbrom_memid = 0;
 void write_pbrom(uint32_t addr, uint32_t val, int sz) {
 	if (addr >= 0x2FFFF0 && addr <= 0x2FFFFF) {
 		val &= 7;
+		if (pbrom_bank == (val << 20))
+			return;
 		pbrom_bank = val << 20;
 		// debugf("[CART] bankswitch %x <= %x (linear: %d)\n", (unsigned int)addr, (unsigned int)pbrom_bank, (bool)banks[0x2].mem);
 
@@ -79,7 +81,7 @@ void write_pbrom(uint32_t addr, uint32_t val, int sz) {
 		return;
 	}
 
-	debugf("[CART] unknown write%d: %06x <- %0*x (PC:%08lx)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, emu_pc());
+	// debugf("[CART] unknown write%d: %06x <- %0*x (PC:%08lx)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, emu_pc());
 }
 
 uint32_t read_pbrom(uint32_t addr, int sz) {
@@ -138,7 +140,7 @@ uint32_t read_hwio(uint32_t addr, int sz)  {
 		case 0x06: assert(sz==2); return lspc_mode_r();
 	}
 
-	debugf("[HWIO] unknown read%d: %06x\n", sz*8, (unsigned int)addr);
+	// debugf("[HWIO] unknown read%d: %06x\n", sz*8, (unsigned int)addr);
 	return 0xFFFFFFFF;
 }
 
@@ -176,7 +178,7 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 		case 0x0C: if (val&1) emu_cpu_irq(3,false); if (val&2) emu_cpu_irq(2,false); if (val&4) emu_cpu_irq(1,false); return;
 	}
 
-	debugf("[HWIO] unknown write%d: %06x <- %0*x (PC=%06lx)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, emu_pc());
+	// debugf("[HWIO] unknown write%d: %06x <- %0*x (PC=%06lx)\n", sz*8, (unsigned int)addr, sz*2, (unsigned int)val, emu_pc());
 }
 
 
