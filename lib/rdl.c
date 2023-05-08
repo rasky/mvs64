@@ -2,6 +2,7 @@
 
 #include <malloc.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "rdp_commands.h"
 
 #define MAX(a,b) ((a)>(b)?(a):(b))
@@ -89,7 +90,7 @@ RdpDisplayList *rdl_sprite(RdpDisplayList *rdl, sprite_t *s, int sx, int sy, boo
     switch (s->bitdepth) {
     case 2: tf = RDP_TILE_SIZE_16BIT; break;
     case 4: tf = RDP_TILE_SIZE_32BIT; break;
-    default: assertf(0, "unsupported bitdepth: %d", s->bitdepth);
+    default: assertf(0, "unsupported bitdepth: %d", s->bitdepth); abort();
     }
 
     int nprims = 6 + ntx*nty*4;
