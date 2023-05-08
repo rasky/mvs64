@@ -58,6 +58,7 @@ static void write_unk(uint32_t addr, uint32_t val, int sz) {
 }
 
 uint32_t pbrom_bank = 0;
+uint32_t pbrom_memid = 0;
 
 void write_pbrom(uint32_t addr, uint32_t val, int sz) {
 	if (addr >= 0x2FFFF0 && addr <= 0x2FFFFF) {
@@ -246,107 +247,6 @@ unsigned int m68k_read_disassembler_32(unsigned int address) {
 	return 0xFFFFFFFF;
 }
 
-
-#ifdef N64
-
-#if 0
-#define C0_INDEX() ({ \
-    uint32_t x; \
-    asm volatile("mfc0 %0,$0":"=r"(x)); \
-    x; \
-})
-
-#define C0_ENTRYLO0() ({ \
-    uint32_t x; \
-    asm volatile("mfc0 %0,$2":"=r"(x)); \
-    x; \
-})
-
-#define C0_ENTRYLO1() ({ \
-    uint32_t x; \
-    asm volatile("mfc0 %0,$3":"=r"(x)); \
-    x; \
-})
-
-#define C0_WRITE_INDEX(x)    asm volatile("mtc0 %0,$0; nop; nop"::"r"(x))
-#define C0_WRITE_ENTRYHI(x)  asm volatile("mtc0 %0,$10; nop; nop"::"r"(x))
-#define C0_WRITE_ENTRYLO0(x) asm volatile("mtc0 %0,$2; nop; nop"::"r"(x))
-#define C0_WRITE_ENTRYLO1(x) asm volatile("mtc0 %0,$3; nop; nop"::"r"(x))
-#define C0_WRITE_PAGEMASK(x) asm volatile("mtc0 %0,$5; nop; nop"::"r"(x))
-
-#define C0_TLBWI()           asm volatile("tlbwi; nop; nop; nop; nop")
-#define C0_TLBR()            asm volatile("tlbr; nop; nop; nop; nop")
-#define C0_TLBP()            asm volatile("tlbp; nop; nop; nop; nop")
-#endif
-
-void tlb_init(void) {
-	C0_WRITE_ENTRYHI(0xFFFFFFFF);
-	C0_WRITE_ENTRYLO0(0);
-	C0_WRITE_ENTRYLO1(0);
-	C0_WRITE_PAGEMASK(0);
-	for (int i=0;i<32;i++) {
-		C0_WRITE_INDEX(i);
-		C0_TLBWI();
-	}
-}
-
-void tlb_map_area(unsigned int idx, uint32_t virt, uint32_t vmask, void* phys, bool readwrite) {
-
-	bool dbl;
-	switch (vmask) {
-	case 0x00FFFF: C0_WRITE_PAGEMASK(0x0F << 13); dbl=false; break;
-	case 0x01FFFF: C0_WRITE_PAGEMASK(0x0F << 13); dbl=true;  break;
-	case 0x03FFFF: C0_WRITE_PAGEMASK(0x3F << 13); dbl=false; break;
-	case 0x07FFFF: C0_WRITE_PAGEMASK(0x3F << 13); dbl=true;  break;
-	case 0x0FFFFF: C0_WRITE_PAGEMASK(0xFF << 13); dbl=false; break;
-	case 0x1FFFFF: C0_WRITE_PAGEMASK(0xFF << 13); dbl=true;  break;
-	default: assert(0);
-	}
-
-	if (dbl) vmask >>= 1;
-	assert(((uint32_t)phys & vmask) == 0);
-	assert((virt & vmask) == 0);
-
-	uint32_t vpn2 = virt;
-	if (!dbl) vpn2 &= ~(vmask+1);
-	C0_WRITE_ENTRYHI(vpn2);
-
-	C0_TLBP();
-	uint32_t existing = C0_INDEX();
-	uint32_t exentry0 = C0_ENTRYLO0();
-	uint32_t exentry1 = C0_ENTRYLO1();
-	assertf((existing & 0x80000000) || (((exentry0|exentry1) & 2) == 0), "Duplicated TLB entry with vaddr %08lx (%lx/%lx)", vpn2, exentry0, exentry1);
-
-	if (dbl || !(virt & (vmask+1))) {	
-		uint32_t entry = ((uint32_t)phys & 0x3FFFFFFF) >> 6;
-		if (readwrite)
-			entry |= (1<<2); // dirty bit
-		entry |= 1<<1; // valid bit
-		entry |= 1<<0; // global bit
-		C0_WRITE_ENTRYLO0(entry);
-	} else {
-		C0_WRITE_ENTRYLO0(1<<0);
-	}
-
-	if (dbl || (virt & (vmask+1))) {	
-		uint32_t entry = (((uint32_t)phys + (dbl ? vmask + 1 : 0)) & 0x3FFFFFFF) >> 6;
-		if (readwrite)
-			entry |= (1<<2); // dirty bit
-		entry |= 1<<1; // valid bit
-		entry |= 1<<0; // global bit
-		C0_WRITE_ENTRYLO1(entry);
-	} else {
-		C0_WRITE_ENTRYLO1(1<<0);		
-	}
-
-	assert(idx < 32);
-	C0_WRITE_INDEX(idx);
-	C0_TLBWI();
-}
-
-#endif
-
-
 void hw_init(void) {
 	uint8_t *PB_ROM = pbrom_linear();
 
@@ -366,20 +266,18 @@ void hw_init(void) {
 	banks[0xD] = (Bank){ BACKUP_RAM,       0x0FFFF,   NULL,            write_unk };
 
 	#ifdef N64
-	#define VBASE M64K_CONFIG_MEMORY_BASE
-
+	extern m64k_t m64k;
 	disable_interrupts();
-	tlb_init();
-	tlb_map_area(0, VBASE+0x000000, 0x7FFFF, P_ROM+0x000000, false);
-	tlb_map_area(1, VBASE+0x080000, 0x7FFFF, P_ROM+0x080000, false);
-	if (PB_ROM) {
-		tlb_map_area(2, VBASE+0x200000, 0x7FFFF, PB_ROM+0x000000, false);
-		tlb_map_area(3, VBASE+0x280000, 0x7FFFF, PB_ROM+0x080000, false);		
-	}
-	tlb_map_area(4, VBASE+0xC00000, 0x1FFFF, BIOS, false);
 
-	tlb_map_area(8, VBASE+0x100000, 0x0FFFF, WORK_RAM, true);
-	tlb_map_area(9, VBASE+0xD00000, 0x0FFFF, BACKUP_RAM, true);
+	m64k_map_memory(&m64k, 0x000000, 0x080000, P_ROM+0x000000, false);
+	m64k_map_memory(&m64k, 0x080000, 0x080000, P_ROM+0x080000, false);
+	m64k_map_memory(&m64k, 0x100000, 0x010000, WORK_RAM,   true);
+	if (PB_ROM) {
+		m64k_map_memory(&m64k, 0x200000, 0x080000, PB_ROM+0x000000, false);
+		m64k_map_memory(&m64k, 0x280000, 0x080000, PB_ROM+0x080000, false);
+	}
+	m64k_map_memory(&m64k, 0xC00000, 0x020000, BIOS,       false);
+	m64k_map_memory(&m64k, 0xD00000, 0x010000, BACKUP_RAM, true);
 
 	// Install special exception handler, so that we can handle our own
 	// exceptions

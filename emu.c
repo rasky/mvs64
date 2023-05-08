@@ -57,7 +57,7 @@ void cpu_start_trace(int cnt) {
 
 static int g_frame;
 #ifdef N64
-static m64k_t m64k;
+m64k_t m64k;
 #endif
 static uint64_t g_clock, g_clock_framebegin;
 static uint64_t m68k_clock;
