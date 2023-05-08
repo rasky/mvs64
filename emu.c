@@ -169,13 +169,49 @@ uint32_t emu_vblank_start(void* arg) {
 uint32_t render_time;
 
 uint32_t emu_render(void *arg) {
-	uint32_t t0 = TICKS_READ();
-	if (true || (g_frame & 1)) {
-		plat_beginframe();
-		video_render();
-		plat_endframe();
+
+	#ifdef N64
+	if (CONFIG_FRAMESKIP_MODE == 2) {
+		extern volatile int N64_FRAME;
+		const int MAX_SKIP = 4;
+		static int skip = 0;
+
+		if (N64_FRAME > g_frame) {
+			skip++;
+			if (skip < MAX_SKIP) {
+				debugf("[RENDER] skip frame\n");
+				return FRAME_CLOCK;
+			}
+			debugf("[RENDER] max skip\n");
+			skip = 0;
+			disable_interrupts();
+			N64_FRAME = g_frame;
+			enable_interrupts();
+		}
 	}
+	#endif
+
+	if (CONFIG_FRAMESKIP_MODE == 1) {
+		if (g_frame & 1) {
+			debugf("[RENDER] skip frame\n");
+			return FRAME_CLOCK;
+		}
+	}
+
+	debugf("[RENDER] render\n");
+	#ifdef N64
+	uint32_t t0 = TICKS_READ();
+	#endif
+	plat_beginframe();
+	video_render();
+	plat_endframe();
+
+	rom_next_frame();
+
+	#ifdef N64
 	render_time = TICKS_DISTANCE(t0, TICKS_READ());
+	#endif
+
 	return FRAME_CLOCK;
 }
 
