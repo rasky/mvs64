@@ -9,6 +9,16 @@ assets_png = $(wildcard assets/*.png)
 
 assets_conv = $(addprefix filesystem/,$(notdir $(wildcard assets/*.btest)))
 
+# Activate more accurate configuration for testsuite
+M64K_CONFIG += -DM64K_CONFIG_TIMING_ACCURACY=0
+M64K_CONFIG += -DM64K_CONFIG_ADDRERR=1
+M64K_CONFIG += -DM64K_CONFIG_PRIVERR=1
+M64K_CONFIG += -DM64K_CONFIG_DIVBYZERO=1
+M64K_CONFIG += -DM64K_CONFIG_ADDR_WRAP=1
+
+N64_CFLAGS += $(M64K_CONFIG)
+N64_ASFLAGS += $(M64K_CONFIG)
+
 all: m64k_testsuite.z64
 
 filesystem/%: assets/%
