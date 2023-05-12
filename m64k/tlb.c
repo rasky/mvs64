@@ -82,7 +82,7 @@ uint32_t __m64k_tlb_add(void *virt, uint32_t vmask, uint32_t phys, int flags)
 	if (dbl) vmask >>= 1;
 
 	// Verify that the addresses are aligned to the needed vmask.
-	assert(((uint32_t)phys & vmask) == 0);
+	assertf((phys & vmask) == 0, "physical address %08lx is not aligned to vmask %08lx", phys, vmask);
 	assert((vaddr & vmask) == 0);
 	if (vmask == 0x000FFF) {
 		// Unfortunately, data cache is indexed using bits 12:4, so a TLB-mapped
