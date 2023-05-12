@@ -132,6 +132,24 @@ opshiftsmem:
     #endif
 .endm
 
+# Consume the specified number of cycles if opcode & mask == value
+# This is only used when M64K_CONFIG_TIMING_ACCURACY==1, as it is used to
+# handle cycle counting exceptions for specific variants of the current opcode
+.macro use_cycles_opmask mask, value, cycles
+    #if M64K_CONFIG_TIMING_ACCURACY >= 1
+    .set noat
+    .set noreorder
+    andi $1, opcode, \mask
+    .if \value != 0
+        xori $1, \value
+    .endif
+    beqzl $1, 1f
+    addi m_cycles, -\cycles
+1:  .set at
+    .set reorder
+    #endif
+.endm
+
 # Configure the current RMW cycle table (if timing accuracy is enabled)
 .macro set_rmw_cyctable table
     #if M64K_CONFIG_TIMING_ACCURACY >= 0
@@ -149,21 +167,6 @@ opshiftsmem:
 1:  # NOTE: the fetched number will be left as rmw_cyctable
     # and will be treated as "zero-ish" next time we run this macro.
     # This saves one instruction as we don't need to set rmw_cyctable to zero
-    #endif
-.endm
-
-.macro use_cycles_opmask mask, value, cycles
-    #if M64K_CONFIG_TIMING_ACCURACY >= 1
-    .set noat
-    .set noreorder
-    andi $1, opcode, \mask
-    .if \value != 0
-        xori $1, \value
-    .endif
-    beqzl $1, 1f
-    addi m_cycles, -\cycles
-1:  .set at
-    .set reorder
     #endif
 .endm
 
