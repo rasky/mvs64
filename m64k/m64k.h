@@ -27,6 +27,8 @@ typedef struct {
     void *hook_irqack_ctx;
 } m64k_t;
 
+typedef uint32_t m64k_mapping_t;
+
 
 void m64k_init(m64k_t *m64k);
 void m64k_pulse_reset(m64k_t *m64k);
@@ -48,6 +50,11 @@ int64_t m64k_run(m64k_t *m64k, int64_t until);
  * and then catching and ignoring the resulting TLB exception, so it will
  * be quite slower than a writable buffer.
  * 
+ * Calling #m64k_map_memory again with the same address will simply cause
+ * the previous mapping to be overwritten. Notice though if the new size
+ * is smaller than the previous one, a parte of the previous mapping will still
+ * be valid. To completely remove a previous mapping, using #m64k_unmap_memory.
+ * 
  * @note As an exception to alignment rules, 4 KiB buffers (the smallest supported)
  *       must be 8 KiB aligned. This is required to enforce cache coherency
  *       between regular and TLB accesses.
@@ -62,8 +69,40 @@ int64_t m64k_run(m64k_t *m64k, int64_t until);
  * @param writable  Whether the memory region is writable. If false, the memory
  *                  will be mapped as read-only.
  * 
+ * @return A mapping ID
+ * 
+ * @see #m64k_map_memory_change
+ * @see #m64k_unmap_memory
  */
-void m64k_map_memory(m64k_t *m64k, uint32_t address, uint32_t size, void *ptr, bool writable);
+m64k_mapping_t m64k_map_memory(m64k_t *m64k, uint32_t address, uint32_t size, void *ptr, bool writable);
+
+/**
+ * @brief Change a memory region previously mapped with #m64k_map_memory.
+ * 
+ * This function can be used to change the address and permissions of a memory
+ * region previously mapped with #m64k_map_memory. Notice that it is always
+ * possible to call #m64k_map_memory again with the same address to obtain
+ * the same effect, but this function is much faster.
+ * 
+ * @param m64k      The m68k context
+ * @param mapping   The mapping ID returned by #m64k_map_memory.
+ * @param ptr       Pointer to the new buffer in N64 memory space.
+ * @param writable  Whether the memory region is writable. If false, the memory
+ *                  will be mapped as read-only.
+ */
+void m64k_map_memory_change(m64k_t *m64k, m64k_mapping_t mapping, void *ptr, bool writable);
+
+/**
+ * @brief Unmap a memory region previously mapped with #m64k_map_memory.
+ * 
+ * After running this function, the previous mapping will be removed from the
+ * m68k memory map. This means that accesses to the memory region will fall
+ * into the MMIO handler.
+ * 
+ * @param m64k      The m68k context
+ * @param mapping   The mapping ID returned by #m64k_map_memory.
+ */
+void m64k_unmap_memory(m64k_t *m64k, m64k_mapping_t mapping);
 
 /**
  * @brief Configure the fast MMIO handlers, written in assembly.
@@ -154,7 +193,7 @@ void m64k_set_mmio_fast_handlers(m64k_t *m64k,
  */
 void m64k_set_mmio_handlers(m64k_t *m64k,
     uint32_t (*read)(uint32_t address, int sz),
-    void (*write)(uint32_t address, uint32_t value, int sz));
+    void (*write)(uint32_t address, uint16_t value, int sz));
 
 
 /**

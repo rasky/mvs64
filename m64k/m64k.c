@@ -212,7 +212,7 @@ void m64k_set_hook_irqack(m64k_t *m64k, int (*hook)(void *ctx, int level), void 
     m64k->hook_irqack_ctx = ctx;
 }
 
-void m64k_map_memory(m64k_t *m64k, uint32_t address, uint32_t size, void *ptr, bool writable)
+m64k_mapping_t m64k_map_memory(m64k_t *m64k, uint32_t address, uint32_t size, void *ptr, bool writable)
 {
     assertf(address < 0x1000000, "address must be in the 24-bit range");
     assertf((size & (size-1)) == 0, "size must be a power of 2");
@@ -224,5 +224,15 @@ void m64k_map_memory(m64k_t *m64k, uint32_t address, uint32_t size, void *ptr, b
 
     void *virt = (void*)(M64K_CONFIG_MEMORY_BASE | address);
     uint32_t phys = PhysicalAddr(ptr);
-    __m64k_tlb_add(virt, size-1, phys, flags);
+    return __m64k_tlb_add(virt, size-1, phys, flags);
+}
+
+void m64k_map_memory_change(m64k_t *m64k, m64k_mapping_t mapping, void *ptr, bool writable)
+{
+    __m64k_tlb_change(mapping, PhysicalAddr(ptr), writable ? 0 : TLBF_READONLY);
+}
+
+void m64k_unmap_memory(m64k_t *m64k, m64k_mapping_t mapping)
+{
+    __m64k_tlb_rem(mapping);
 }
