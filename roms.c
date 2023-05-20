@@ -246,7 +246,9 @@ void pbrom_init(const char *fn) {
 		return;
 	}
 
-	PB_ROM = memalign(512*1024, len);
+	// Allocate a buffer to hold the PBROM file with 1 MiB alignment so that
+	// can later TLB-map it into the 1 MiB area in the m68k space.
+	PB_ROM = memalign(1024*1024, len);
 	assertf(PB_ROM, "cannot allocate PBROM buffer");
 
 	// We have enough RDRAM to fully load the PBROM file into RDRAM
