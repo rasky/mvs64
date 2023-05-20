@@ -560,6 +560,7 @@ mvs64_asm_io_read16:
 	j tlbcallhandler_standard
 
 mvs64_asm_io_write:
+	beq k1, 0x2FFFF0, asm_pbrom_bankno_w
 	beq k1, 0x300001, asm_watchdog_w
 	beq k1, 0x3C0000, asm_lspc_vram_addr_w
 	beq k1, 0x3C0002, asm_lspc_vram_data_w
@@ -645,4 +646,46 @@ asm_pbrom_r8:
 	lbu t6, 0(k1)
 	jr ra
 
+#define C0_ENTRYHI	$10
+#define C0_INDEX	$0
+#define C0_ENTRYLO0 $2
+
+asm_pbrom_bankno_w:
+	# Check if the new bank is different from the current one
+	sll t6, 20
+	lw k0, %gprel(pbrom_bank)(gp)
+	beq k0, t6, 1f
+
+	# Save new bank
+	sw t6, %gprel(pbrom_bank)(gp)
+
+	# Find TLB entry used for the TLB
+	mfc0 k1, C0_BADVADDR              # Load the original vaddr
+	and k1, 0xFFFFFFFFFFFFF000
+	mtc0 k1, C0_ENTRYHI; 	nop; nop
+	tlbp; 					nop; nop; nop; nop
+
+	# No match? abort
+	.set noat
+	mfc0 $1, C0_INDEX
+	bltz $1, tlbfallback
+	.set at
+
+	# Read the entry
+	tlbr
+
+	# The entry is in ENTRYLO0 because the virtual address $200000 has bit 20 cleared.
+	lw k1, %gprel(PB_ROM)(gp)
+	add k1, t6
+	and k1, 0xFFFFFF
+	srl k1, 6
+	ori k1, 3    # global, valid
+	mtc0 k1, C0_ENTRYLO0; 	nop; nop
+
+	# write back the new TLB entry
+	tlbwi
+
+1:	li k0, 1
+	jr ra
+	
 
