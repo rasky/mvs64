@@ -73,8 +73,7 @@ void write_pbrom(uint32_t addr, uint32_t val, int sz) {
 			banks[0x2].mem = pbrom_linear() + val*0x100000;
 			#ifdef N64
 			extern m64k_t m64k;
-			m64k_map_memory(&m64k, 0x200000, 0x080000, banks[0x2].mem+0x000000,     false);
-			m64k_map_memory(&m64k, 0x280000, 0x080000, banks[0x2].mem+0x080000,     false);
+			m64k_map_memory(&m64k, 0x200000, 0x100000, banks[0x2].mem, false);
 			// m64k_map_memory_change(&m64k, pbrom_memid, banks[0x2].mem, false);
 			#endif
 		}
@@ -282,8 +281,7 @@ void hw_init(void) {
 	m64k_map_memory(&m64k, 0x080000, 0x080000, P_ROM+0x080000, false);
 	m64k_map_memory(&m64k, 0x100000, 0x010000, WORK_RAM,   true);
 	if (PB_ROM) {
-		m64k_map_memory(&m64k, 0x200000, 0x080000, PB_ROM+0x000000, false);
-		m64k_map_memory(&m64k, 0x280000, 0x080000, PB_ROM+0x080000, false);
+		m64k_map_memory(&m64k, 0x200000, 0x100000, PB_ROM+0x000000, false);
 	}
 	m64k_map_memory(&m64k, 0xC00000, 0x020000, BIOS,       false);
 	m64k_map_memory(&m64k, 0xD00000, 0x010000, BACKUP_RAM, true);
