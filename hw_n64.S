@@ -504,11 +504,18 @@ tlbfallback:
 
 
 mvs_inthandler:
+	# Isolate exception cause
 	mfc0 k0, C0_CAUSE
-	andi k0, 0xFF
-	xori k0, 1<<2        # TLB modification
-	beqz k0, mvs_tlbhandler
-	 nop
+	srl k0, 2
+	andi k0, 0x3F
+	# Check if the value is 1, 2, or 3:
+	#   1: TLB modification: happens if we write to a TLB entry marked as read-only
+	#   2: TLB load invalid: happens when we load from an invalid TLB address
+	#   3: TLB store invalid: happens when we store to an invalid TLB address
+	addiu k0, -1
+	sltiu k0, k0, 3
+	bnez k0, mvs_tlbhandler
+	nop
 	j inthandler
 	nop
 
