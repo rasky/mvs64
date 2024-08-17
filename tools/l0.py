@@ -104,4 +104,5 @@ for vshrink in range(256):
 ROM2 = bytes(data + data)
 
 # Check that the reconstructed ROM is identical to the new one.
-assert ROM == ROM2, "Failure in reconstructing original ROM"
+if ROM != ROM2:
+	raise AssertionError("Failure in reconstructing original ROM")
